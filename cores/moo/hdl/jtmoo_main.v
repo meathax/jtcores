@@ -116,7 +116,16 @@ assign cpu_dout = prot_bgackn ? cpu_dout_68k : prot_din;
 assign oram_we  = ~ram_dsn & {2{~rw & oram_wr}};
 assign oram_cs  =  oram_wr & ~BUSn;
 
-assign st_dout  = 0; // status byte permanently zero; debug-only, no consumer wires it up
+// E5: debug-only status byte, no functional consumer on real hardware.
+// Was permanently tied to 0 (previous session found the original intended
+// expression referenced signals -- rmrd/div8/game_id -- that no longer
+// exist in this design and could not be honestly reconstructed). Wired
+// instead to the interrupt/DMA/bus-arbitration state the D1/D2 work in
+// this session most needed to observe: bus master handshake, the level-5
+// (DMA-end) and level-4 (INT1) request latches, the raw DMA-busy strobe,
+// and the current IPL encoding -- useful for a future ioctl/debug_bus
+// differential check of the D2 fix without adding a new debug port.
+assign st_dout  = { 1'b0, prot_bgackn, intdma, int1, dma_bsy, IPLn };
 assign dtac_mux = DTACKn;
 assign pair_we  = pair_cs && !RnW && !LDSn;
 
@@ -194,10 +203,16 @@ always @* begin
 `endif
 end
 
+// D2 (KNOWN, main.md sec.6/9 GAP-5 note + sec.7): the level-5 flip-flop
+// (G6B.1) clocks on "C = NOT OBJDMA" (K8.3), i.e. on the falling edge of
+// OBJDMA -- when sprite DMA *ends*, not when it starts. dma_bsy is OBJDMA's
+// RTL equivalent (active high while DMA is in progress), so the rising edge
+// of ~dma_bsy is the falling edge of dma_bsy/OBJDMA. Previously edgeof was
+// dma_bsy itself (DMA start) -- fixed here to ~dma_bsy (DMA end).
 jtframe_edge #(.QSET(0)) u_ff(
     .rst        ( rst       ),
     .clk        ( clk       ),
-    .edgeof     ( dma_bsy   ),
+    .edgeof     (~dma_bsy   ),
     .clr        (~intdma_enb),
     .q          ( intdma    ) // IRQ in schematics
 );
@@ -241,6 +256,13 @@ always @(posedge clk) begin
     // input, including start and coin, to the wrong address.
     cab_dout <= A[1] ? { cab_1p[3], joystick4, cab_1p[1], joystick2 }:
                        { cab_1p[2], joystick3, cab_1p[0], joystick1 };
+    // D8 (KNOWN, io_cabinet.kicad_sch S16 / crtc_io_snd_latch.md G9): the
+    // real board has four independent SERVICE1-4 inputs on D4-D7 of IOCSB
+    // (MAME moo.cpp:668-671 keeps them separate). JTFRAME's MiSTer wrapper
+    // exposes a single service-coin key, so all four board inputs stay
+    // tied to that one bit ({4{service}}); this is a framework limitation,
+    // not a schematic-vs-RTL mismatch, and is not worth spending unused
+    // buttons on. See README for the deliberate-deviation list.
     io_dout  <= A[1] ? { dipsw, dip_test, 1'b1, eep_rdy, eep_do }:
                        { service , coin };
 end
@@ -268,7 +290,24 @@ always @(posedge clk, posedge rst) begin
             if( !dsn_mx[1] ) begin
                 cur_ctrl2[15:8] <= cpu_dout[15:8];
                 objcha_n <= ~cpu_dout[8];
+                // D4 (HYPOTHESIS, crtc_io_snd_latch.md G8 / scroll.md sec.4
+                // item 3 / main.md D4): bit 9 -> N6.Q1 -> J8.1 XOR ~MCLK2 ->
+                // H6.4 AND FPAL4 -> net N$26, confirmed a dead end in the
+                // capture by three independent sheet audits (053252, scroll
+                // and io_cabinet net lists all show H6.4 pin 11 unconnected).
+                // Its real destination in the colour path (jtmoo_colmix.v,
+                // out of this file's scope) cannot be resolved from the
+                // available capture. Left wired here exactly as before;
+                // do not "fix" the colmix consumer on a guess.
                 blnk_sel <=  cpu_dout[9];
+                // D3 (KNOWN, crtc_io_snd_latch.md sec.5 item "D11 -> Q3/~Q3
+                // -> both NC"): the real board latches control2 bit 11 but
+                // never connects it anywhere, so MAME's "bit 11 enables
+                // IRQ4 (unconfirmed)" is not supported by the schematic.
+                // Level 4 (IPLn<=3'b011 above, gated only on int1) stays
+                // ungated on purpose -- this matches the board, not a
+                // shortcut. Do not gate it on cur_ctrl2[11] without new
+                // hardware evidence contradicting the capture.
             end
         end
     end
@@ -282,6 +321,15 @@ wire        prot_asn, prot_wrn, prot_irqn,
             prot_brn, prot_bgackn, BGn;
 reg         prot_cs;
 assign prot_dout  = cpu_din;
+// D1 (KNOWN, main.md GAP-4 / sec.7, MAME_SYSTEM=moomesa mame_read_memory
+// evidence): level-3 autovector (0x00006C) reads 0x00001000, the same
+// address shared by levels 1, 2, 6 and 7. The code at 0x1000 is
+// `move.w d0,$1000; nop; bra.s *-4` -- an infinite dead loop, not an rte or
+// real handler. Levels 4 (0x24B0) and 5 (0x2482) instead hold distinct
+// handlers that clear real RAM flags. So the ROM never expects level 3 to
+// fire; asserting it would hang the CPU forever. prot_irqn stays hard-tied
+// to 1 (never asserted) rather than wiring a 053990 IRQ output -- confirmed
+// closed, not merely deferred.
 assign prot_irqn = 1;
 jtriders_tmnt2 u_prot(
     .rst        ( rst           ),
@@ -339,9 +387,43 @@ jt5911 #(.SIMFILE("nvram.bin")) u_eeprom(
     .dump_flag  (           )
 );
 
-// The board seems to control DTACKn with combinational logic
-// DTACKn follows ASn with a delay of ~15.6ns
-wire slow_mem = rom_cs | ram_cs;
+// D9 (main.md sec.6/GAP-5, KNOWN for rmrd_cs / HYPOTHESIS for vram_cs):
+// ~DTACK = o23(PAL) & DTACK(054338) & N$27 & N$23. o23 is combinational
+// and gives zero-wait DTACK straight off /AS for everything EXCEPT
+// 0x1A0000-0x1BFFFF -- that includes rom_cs and ram_cs, so the old
+// `wait2 = slow_mem` on them was a JTFRAME SDRAM-latency guess, not a
+// board fact; real SDRAM latency is already covered by the *_ok terms in
+// bus_busy above, so wait2 is removed entirely (tied 0).
+//   - rmrd_cs (0x1B0000 tile-ROM read-back, KNOWN wiring / INFERRED exact
+//     count): N$23 = NOT M7.Q2, a 74LS174 4-stage shift chain (D5-Q5-D4-Q4-
+//     D3-Q3-D2-Q2) clocked at 16 MHz (M16B) and reset by ~AS -- 4 x 16 MHz
+//     wait cycles. jtframe_68kdtack_cen's own header comment documents
+//     wait3=1 as "3 wait states" (vs. the default mandatory 1), the closest
+//     built-in match to a fixed multi-cycle chain, so wait3 is wired to
+//     rmrd_cs here rather than adding a bespoke counter. Whether this
+//     module's wait3 path reproduces exactly 4 (vs. 3) 16 MHz cycles
+//     depends on fx68k's AS/DS timing relative to this counter's ASn_l
+//     load edge, which needs a cycle trace to confirm, not hand tracing --
+//     left INFERRED pending a differential run once simulation is
+//     available again (see log). rmrd_cs also keeps its existing SDRAM-
+//     latency stall via vdtac in bus_busy above (lyrf_ok, the tile-ROM
+//     burst-ready signal) -- that term models real SDRAM access time,
+//     which the board's fixed
+//     4-stage chain does not have to wait for (Furrtek ROM read-back is a
+//     latched byte, not a burst), so this RTL is stricter than the board
+//     on this path but not known to violate it (both delay assertion by
+//     at least 4 cycles, this one may delay it longer while SDRAM answers).
+//   - vram_cs/scr_cs (0x1A0000 054157/056832 VRAM, HYPOTHESIS): N$27 is a
+//     3-stage 74LS74 chain (J6.2->K7.1->J6.1) clocked by `~M6`/`M3`/`~M6`.
+//     Neither ~M6 nor M3 has a captured driver anywhere in this project
+//     (main.md Q-2, scroll.md sec.4 item 5, crtc_io_snd_latch.md sec.5
+//     item 4 all independently confirm this -- the 053252 CLK1/CLK2
+//     outputs that are the leading candidate have no captured consumer
+//     either). Without a measured or documented ~M6/M3 period there is no
+//     evidence-backed cycle count to encode, so vram_cs/scr_cs is left
+//     running the framework's normal one-wait-state DTACK cycle (no wait2/
+//     wait3, no counter) rather than inventing one. Do not "fix" this
+//     without a board logic-analyser trace or the paper schematic.
 jtframe_68kdtack_cen #(.W(6),.RECOVERY(1)) u_dtack(
     .rst        ( rst       ),
     .clk        ( clk       ),
@@ -358,8 +440,11 @@ jtframe_68kdtack_cen #(.W(6),.RECOVERY(1)) u_dtack(
     .num        ( 5'd1      ),  // numerator
     .den        ( 6'd3      ),  // denominator, 3 (16MHz)
     .DTACKn     ( DTACKn    ),
-    .wait2      ( slow_mem  ),  // RAM of that age didn't operate at 16MHz
-    .wait3      ( 1'b0      ),
+    .wait2      ( 1'b0      ),  // o23 is zero-wait for rom_cs/ram_cs (D9); real
+                                 // SDRAM latency is covered by rom_ok/ram_ok
+                                 // in bus_busy instead of a guessed wait2.
+    .wait3      ( rmrd_cs   ),  // 0x1B0000 tile-ROM read-back 4-stage/16MHz
+                                 // chain (D9, main.md sec.6, KNOWN).
     // Frequency report
     .fave       (           ),
     .fworst     (           )
