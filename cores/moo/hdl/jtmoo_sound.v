@@ -45,10 +45,16 @@ module jtmoo_sound(
                                  // from cfg/mem.yaml's `pcm` bus; it just wasn't
                                  // threaded through this module until now.
     // Sound output. k539_l/r: K054321-attenuated K054539 PCM (unchanged name/
-    // wiring). fm_l/r: YM2151 FM, now its OWN mixer channel (C5 FM-routing
-    // decision, see the jt054539 instantiation below for why) instead of
-    // being summed into the K054539's AUX input as the real board schematic
-    // shows -- deliberate accuracy/practicality tradeoff, documented there.
+    // wiring). fm_l/r: YM2151 FM, STILL its own mixer channel (C5 FM-routing
+    // decision: the real board sums FM into the K054539's AUX input before
+    // that chip's own L/R pins, but the ported jt054539 has no AUX input --
+    // see the jt054539 instantiation below) but now ALSO attenuated by the
+    // same K054321 volume register as k539_l/r (C6b): fm_l/r no longer
+    // bypass the CPU's volume fade. gain*(a+b) == gain*a + gain*b, so
+    // independently scaling fm and pcm here and summing them later at the
+    // jtframe mixer is numerically equivalent to the board's sum-then-
+    // attenuate order inside the chip -- see jt054321.v and the u_54321
+    // instantiation below for the mechanism.
     output     signed [15:0] k539_l, k539_r,
     output     signed [15:0] fm_l, fm_r,
     // Debug
@@ -66,6 +72,12 @@ wire        m1_n, mreq_n, rd_n, wr_n, iorq_n, rfsh_n, nmi_n,
 reg         ram_cs, fm_cs, k39_cs, k21_cs, bank_we, mem_acc, nmi_clr;
 // K054539 output before the K054321's global volume stage
 wire signed [15:0] pcm_l, pcm_r;
+// YM2151 output before the K054321's global volume stage (C6b). Previously
+// fm_l/fm_r (the module's own output ports) were wired directly here,
+// bypassing the K054321 entirely; now they are the u_54321 AUDIO=1 second
+// pair's OUTPUT (out2_l/out2_r), and this pre-attenuation pair feeds its
+// second INPUT (snd2_l/snd2_r) instead.
+wire signed [15:0] fm_pre_l, fm_pre_r;
 wire [ 1:0] nc;         // C8: pcm_addr is now 22 bits, rom_addr is 24. Harmless
                         // padding: jt054539's internal rom_addr accumulator
                         // never needs bits [23:22] for a real 2MB (Moo Mesa)
@@ -188,11 +200,13 @@ jt51 u_jt51(
     // stream, not the internal full-resolution accumulator. C10. C5 (port):
     // jt054539.v has no AUX input (see the FM-routing note below), so this
     // low-resolution `left`/`right` output now feeds its own mixer channel
-    // (`fm_l`/`fm_r`, module output) instead of the K054539 -- still the
-    // low-resolution pair called for by C10, just summed a stage later.
+    // via u_54321's second pair (C6b: `fm_pre_l`/`fm_pre_r` -> attenuated ->
+    // `fm_l`/`fm_r`, module output) instead of the K054539's AUX pin -- still
+    // the low-resolution pair called for by C10, just summed a stage later
+    // and now sharing the same CPU volume register as PCM.
     .sample     (           ),
-    .left       ( fm_l      ),
-    .right      ( fm_r      ),
+    .left       ( fm_pre_l  ),
+    .right      ( fm_pre_r  ),
     // Full resolution output (unused: not what the real board wires here)
     .xleft      (           ),
     .xright     (           )
@@ -221,6 +235,24 @@ jt51 u_jt51(
 // Evidence class: KNOWN (schematic wiring) vs INFERRED (that the separate-
 // channel approach is audibly equivalent) -- a real accuracy/practicality
 // tradeoff, not an oversight.
+//
+// C6b (this change): the chip-summing deviation above is about WHERE FM and
+// PCM are added together (inside the K054539 vs downstream at the jtframe
+// mixer) -- it says nothing about volume. Before this change, fm_l/fm_r
+// were wired straight from u_jt51 to this module's output ports, so the
+// K054321's global volume register (u_54321 below) never touched FM at
+// all: the CPU's volume fade (moo.cpp frames 959-1022) would fade PCM to
+// silence while FM stayed at full volume, which does not match ANY
+// plausible reading of the schematic (every reading has FM reach the
+// K054321 one way or another, either inside the K054539's sum or, on this
+// port, downstream of it). Fixed by routing fm_pre_l/fm_pre_r through
+// u_54321's new second pair (snd2_l/snd2_r -> out2_l/out2_r, jt054321.v)
+// so the SAME `gain` register scales both FM and PCM, while still keeping
+// fm_l/fm_r as this module's own separate output channel (no re-summing
+// inside a shared accumulator, so the upstream author's clip16 rail
+// problem does not return). Class INFERRED (same tier as the FM-routing
+// decision above: the attenuation-law equivalence is a arithmetic argument,
+// not an independent hardware measurement of this board).
 jt054539 #(.VOLSHIFT(1)) u_k054539(
     .rst        ( rst       ),
     .clk        ( clk       ),
@@ -249,6 +281,9 @@ jt054539 #(.VOLSHIFT(1)) u_k054539(
 // The K054321 sits in series with the only audio path on the board:
 // E4 FRDT/WDCK/LRCK -> U2.1/2/3, U2.9/10/11 -> U1 AD1868 -> 1B1 LA4705.
 // AUDIO(1) makes its global volume register act on the K054539 pair. C6.
+// C6b: the SAME register also now attenuates FM through the second pair
+// (snd2_l/snd2_r -> out2_l/out2_r), since the CPU volume fade must reach
+// both on real hardware (see the jt054539 instantiation comment above).
 jt054321 #(.AUDIO(1)) u_54321(
     .rst        ( rst       ),
     .clk        ( clk       ),
@@ -273,7 +308,12 @@ jt054321 #(.AUDIO(1)) u_54321(
     .snd_l      ( pcm_l     ),
     .snd_r      ( pcm_r     ),
     .out_l      ( k539_l    ),
-    .out_r      ( k539_r    )
+    .out_r      ( k539_r    ),
+    // C6b: same global volume applied to FM, kept as a separate output pair
+    .snd2_l     ( fm_pre_l  ),
+    .snd2_r     ( fm_pre_r  ),
+    .out2_l     ( fm_l      ),
+    .out2_r     ( fm_r      )
 );
 `else
 initial rom_cs   = 0;

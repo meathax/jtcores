@@ -25,6 +25,12 @@ audio:
   # channel's rsum for balance since both channels' vpp is already handled
   # by audio_mod.yaml), not derived from this board. Evidence class:
   # HYPOTHESIS. See jtmoo_sound.v's jt054539 instantiation comment.
+  # C6b: `fm` and `k539` still mix here, downstream, as two separate rcmix
+  # channels (unchanged by C6b) -- but both are now attenuated by the SAME
+  # K054321 volume register before reaching this stage (jt054321.v
+  # snd_l/snd_r and snd2_l/snd2_r, both driven by one `gain`). Only the
+  # *volume law* gap is fixed by C6b; the rsum/rc HYPOTHESIS above is
+  # unrelated and unchanged.
   channels:
     - { name: fm,     module: jt51,     rsum: 1k, rc: [ { r: rout, c: 2.2n } ] }
     - { name: k539,   module: jt054539, rsum: 1k, rc: [ { r: 4.7k, c: 2.2n } ] }
