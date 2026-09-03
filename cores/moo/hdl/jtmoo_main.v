@@ -8,7 +8,6 @@ module jtmoo_main(
     input                rst,
     input                clk, // 48 MHz
     input                cen_16,
-    input                LVBL,
     input                bucky,
     input                int1,
 
@@ -300,6 +299,15 @@ always @(posedge clk, posedge rst) begin
                 // available capture. Left wired here exactly as before;
                 // do not "fix" the colmix consumer on a guess.
                 blnk_sel <=  cpu_dout[9];
+                // D6 (KNOWN wire / no timeout evidence, rtl_worklist.md):
+                // control-latch bit 10 -> N6.Q2 -> the 051550 watchdog CLK
+                // input (053252.kicad_sch N6, io_cabinet.kicad_sch G3). The
+                // real watchdog timeout period is not captured anywhere in
+                // the schematic set. Deliberately unimplemented: cur_ctrl2
+                // latches bit 10 (so a read-back of REG_WRITE is faithful)
+                // but nothing consumes it -- there is no RTL watchdog timer
+                // and no reset-on-timeout path. Do not add one on a guessed
+                // period; this is a hygiene note (H2), not an open bug.
                 // D3 (KNOWN, crtc_io_snd_latch.md sec.5 item "D11 -> Q3/~Q3
                 // -> both NC"): the real board latches control2 bit 11 but
                 // never connects it anywhere, so MAME's "bit 11 enables
