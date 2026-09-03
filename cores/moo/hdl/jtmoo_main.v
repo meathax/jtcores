@@ -289,15 +289,22 @@ always @(posedge clk, posedge rst) begin
             if( !dsn_mx[1] ) begin
                 cur_ctrl2[15:8] <= cpu_dout[15:8];
                 objcha_n <= ~cpu_dout[8];
-                // D4 (HYPOTHESIS, crtc_io_snd_latch.md G8 / scroll.md sec.4
-                // item 3 / main.md D4): bit 9 -> N6.Q1 -> J8.1 XOR ~MCLK2 ->
-                // H6.4 AND FPAL4 -> net N$26, confirmed a dead end in the
-                // capture by three independent sheet audits (053252, scroll
-                // and io_cabinet net lists all show H6.4 pin 11 unconnected).
-                // Its real destination in the colour path (jtmoo_colmix.v,
-                // out of this file's scope) cannot be resolved from the
-                // available capture. Left wired here exactly as before;
-                // do not "fix" the colmix consumer on a guess.
+                // D4 (destination now KNOWN at schematic level; RTL still
+                // BLOCKED -- see jtmoo_colmix.v ci2 comment): bit 9 -> N6.Q1
+                // -> J8.1 XOR ~MCLK2 -> H6.4 AND FPAL4 -> SEL of L_B6
+                // (74LS157) -> K053251 CI20-CI23 (ci2[3:0], layer A's colour
+                // -index low nibble). An earlier reading here said H6.4 pin
+                // 11 was unconnected ("net N$26, a dead end") -- a
+                // 2026-09-03(night) re-trace with two independent net-
+                // extraction tools found that was a stale per-sheet KiCad
+                // auto-label collision, not a real dead end; the destination
+                // above is KNOWN, corroborated by both tools. jtmoo_colmix.v
+                // still cannot consume it: no ~MCLK2-equivalent toggling
+                // clock exists in that module's domain (only `clk`/
+                // `pxl_cen`, and the MCLK2:pxl_cen ratio is not established
+                // from the capture), so the gate is not wired there either --
+                // do not "fix" the colmix consumer on a guessed ratio. Left
+                // wired here exactly as before.
                 blnk_sel <=  cpu_dout[9];
                 // D6 (KNOWN wire / no timeout evidence, rtl_worklist.md):
                 // control-latch bit 10 -> N6.Q2 -> the 051550 watchdog CLK
