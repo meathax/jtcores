@@ -17,7 +17,11 @@ module jtsimson_obj #(parameter
     // External object-RAM entry geometry, see jt053246_dma.v
     ESTRIDE_LOG2 = 3,
     ENTRY_LOG2   = 9,
-    parameter [9:0] HOFFSET   = 10'd62
+    parameter [9:0] HOFFSET   = 10'd62,
+    // See jt053246.sv: forces mode8=0 (16-bit register decode) regardless
+    // of cfg[2]. Default 0 reproduces today's behaviour. Declared with its
+    // own `parameter` keyword so it does not inherit HOFFSET's [9:0] type.
+    parameter       FORCE16   = 0
 )(
     input             rst,
     input             clk,
@@ -125,7 +129,8 @@ jt053246 #(
     .EDGE_TRIGGER    ( EDGE_TRIGGER     ),
     .ESTRIDE_LOG2    ( ESTRIDE_LOG2     ),
     .ENTRY_LOG2      ( ENTRY_LOG2       ),
-    .HOFFSET         ( HOFFSET          )
+    .HOFFSET         ( HOFFSET          ),
+    .FORCE16         ( FORCE16          )
 ) u_scan (    // sprite logic
     .rst        ( rst       ),
     .clk        ( clk       ),

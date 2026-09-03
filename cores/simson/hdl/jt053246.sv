@@ -64,6 +64,17 @@ module jt053246(    // sprite logic
 parameter       K55673=0, K55673_DESC_SORT=0, EDGE_TRIGGER=0;
 parameter       ESTRIDE_LOG2=3, ENTRY_LOG2=9; // see jt053246_dma.v
 parameter [9:0] HOFFSET   = 10'd62;
+// GAP 7 / B10: cfg[2] ("mode8") is a guess for switching the 46/47 pair to
+// 8-bit access. Boards with both ~UDS and ~LDS wired (e.g. Moo Mesa, F10)
+// are unambiguously 16-bit. A MAME boot trace of moomesa's 0x0C2000-0x0C2007
+// writes (D:\evidence\moo\mame\b10_053246_regwrites.jsonl, single write to
+// 0x0C2004 at frame 8, data=0x6060, bit2 of the low byte clear, never
+// rewritten in 600 frames / 10s) shows the ROM never sets cfg[2] on this
+// board -- KNOWN (MAME, tier 3), so FORCE16 changes nothing observable for
+// Moo Mesa; it removes the guess instead of relying on it staying true.
+// Default 0 reproduces today's behaviour (mode8 = cfg[2]) for every other
+// caller (riders/rungun/xmen).
+parameter       FORCE16=0;
 
 localparam [2:0] REG_XOFF  = 0, // X offset
                  REG_YOFF  = 1, // Y offset
@@ -82,7 +93,7 @@ wire        dma_wel, dma_weh, cpu_bsy,
 
 assign ghf       = cfg[0]; // global flip
 assign gvf       = cfg[1];
-assign mode8     = cfg[2]; // guess, use it for 8-bit access on 46/47 pair
+assign mode8     = FORCE16 ? 1'b0 : cfg[2]; // guess, use it for 8-bit access on 46/47 pair
 assign cpu_bsy   = cfg[3];
 assign dma_en    = cfg[4];
 

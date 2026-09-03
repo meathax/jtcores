@@ -147,6 +147,7 @@ jtmoo_video u_video (
     // Object DMA
     .oram_we        ( oram_we       ),
     .dma_bsy        ( dma_bsy       ),
+    .bucky          ( bucky         ),
 
     .objsys_cs      ( objsys_cs     ),
     .objreg_cs      ( objreg_cs     ),

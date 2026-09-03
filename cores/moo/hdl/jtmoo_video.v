@@ -18,6 +18,12 @@ module jtmoo_video(
 
     // Object DMA
     input      [ 1:0] oram_we,
+    // GAP 6 / B11: Bucky O'Hare's 053247 zmask differs from Moo Mesa's
+    // (moo.cpp:298 vs :312). Routed into jtsimson_obj's `simson` port,
+    // which jt053246_dma.v uses to skip zero-low-byte sprite entries
+    // (0x00FF zmask behaviour) when set. bucky=0 for Moo Mesa keeps
+    // today's zmask=0xFFFF (no entries skipped) -- KNOWN (MAME, tier 3).
+    input              bucky,
     // CPU interface
     input      [16:1] cpu_addr,
     input      [ 1:0] cpu_dsn,
@@ -230,12 +236,14 @@ assign orama = {cpu_addr[15:8], cpu_addr[5:1]};
 
 localparam [9:0] OVOFFSET=0;
 
-jtsimson_obj #(.RAMW(13),.SHADOW(1),.ESTRIDE_LOG2(5),.ENTRY_LOG2(8)) u_obj(    // sprite logic
+// GAP 7 / B10: FORCE16=1 -- Moo Mesa's 053246 pair is unambiguously 16-bit
+// (F10 has both ~UDS and ~LDS). See jt053246.sv comment / B10 evidence log.
+jtsimson_obj #(.RAMW(13),.SHADOW(1),.ESTRIDE_LOG2(5),.ENTRY_LOG2(8),.FORCE16(1)) u_obj(    // sprite logic
     .rst        ( rst       ),
     .clk        ( clk       ),
     .pxl_cen    ( pxl_cen   ),
     .pxl2_cen   ( pxl2_cen  ),
-    .simson     ( 1'b0      ),
+    .simson     ( bucky     ),
     .ln_done    (           ),
 
     .voffset    ( OVOFFSET  ),
