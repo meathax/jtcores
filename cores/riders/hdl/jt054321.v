@@ -2,9 +2,26 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  * Date: 4-8-2024 */
 
-// AUDIO=0 (default) keeps the historical behaviour exactly: the volume register
-// is maintained but never applied, and snd_l/snd_r pass straight through.
+// AUDIO=0 (default) keeps the historical behaviour exactly: the volume
+// register is maintained but never applied, and snd_l/snd_r (and
+// snd2_l/snd2_r, if connected) pass straight through.
 // AUDIO=1 applies the global volume to the audio pair (Moo Mesa, C6).
+//
+// snd2_l/snd2_r -> out2_l/out2_r (C6b, Moo Mesa only): a SECOND audio pair
+// that shares the exact same volume register/gain law as snd_l/snd_r,
+// scaled by an independent multiply rather than pre-summed with snd_l/snd_r
+// (avoids reproducing the accumulator-headroom problem the jt054539 port's
+// own author hit when summing FM+PCM before a single clip stage -- see
+// jtmoo_sound.v). gain*(a+b) == gain*a + gain*b exactly, so two
+// independently-scaled channels summed later at the downstream mixer are
+// numerically equivalent to the real board's sum-then-attenuate order
+// inside the K054539, aside from the two channels' own separate
+// quantisation (already documented elsewhere, C10). Left unconnected (and
+// so unused) by every core that does not set AUDIO=1; those instantiations
+// get the same class of PINMISSING lint warning that pal8_n already
+// causes -- no behaviour change. Class INFERRED (the equivalence claim;
+// the board itself sums before a single pair of K054539 output pins, this
+// module sums after two separately-scaled paths at the jtframe mixer).
 module jt054321 #(parameter AUDIO=0)(
     input            rst,
     input            clk,
@@ -33,7 +50,14 @@ module jt054321 #(parameter AUDIO=0)(
     input signed [15:0] snd_l,
     input signed [15:0] snd_r,
     output signed [15:0] out_l,
-    output signed [15:0] out_r
+    output signed [15:0] out_r,
+
+    // Second audio pair, only touched when AUDIO=1 (C6b). See the module
+    // header comment. Unconnected in every core but Moo Mesa.
+    input signed [15:0] snd2_l,
+    input signed [15:0] snd2_r,
+    output signed [15:0] out2_l,
+    output signed [15:0] out2_r
 );
 
 reg [7:0] snd_latch[0:2];
@@ -89,6 +113,8 @@ end
 // Known deviation, left alone on purpose to keep this shared module's diff
 // additive: MAME only increments on a non-zero data write; the loop above
 // increments on any write to maddr==3. Harmless while AUDIO=0 (vol unread).
+// The same `gain` value now drives BOTH audio pairs (C6b): one register,
+// one law, applied identically to snd_l/snd_r and snd2_l/snd2_r.
 reg [8:0] gain;     // 1/256 units, 0..256
 
 always @(*) begin
@@ -113,22 +139,34 @@ end
 
 generate
     if( AUDIO==1 ) begin : g_audio
-        // 16s x 10s = 26 bits; |product| <= 2^23 so bits 23:8 are the /256 result
-        reg signed [25:0] mul_l, mul_r;
+        // 16s x 10s = 26 bits; |product| <= 2^23 so bits 23:8 are the /256
+        // result. Each pair is scaled independently (not pre-summed), so
+        // neither multiply can overflow beyond what a single AUDIO=1 pair
+        // already tolerated before C6b: gain<=256 (unity), so
+        // |out| <= |in| for both pairs, same as before.
+        reg signed [25:0] mul_l, mul_r, mul2_l, mul2_r;
         always @(posedge clk) begin
             if( rst ) begin
-                mul_l <= 26'd0;
-                mul_r <= 26'd0;
+                mul_l  <= 26'd0;
+                mul_r  <= 26'd0;
+                mul2_l <= 26'd0;
+                mul2_r <= 26'd0;
             end else begin
-                mul_l <= snd_l * $signed({1'b0,gain});
-                mul_r <= snd_r * $signed({1'b0,gain});
+                mul_l  <= snd_l  * $signed({1'b0,gain});
+                mul_r  <= snd_r  * $signed({1'b0,gain});
+                mul2_l <= snd2_l * $signed({1'b0,gain});
+                mul2_r <= snd2_r * $signed({1'b0,gain});
             end
         end
-        assign out_l = mul_l[23:8];
-        assign out_r = mul_r[23:8];
+        assign out_l  = mul_l[23:8];
+        assign out_r  = mul_r[23:8];
+        assign out2_l = mul2_l[23:8];
+        assign out2_r = mul2_r[23:8];
     end else begin : g_bypass
-        assign out_l = snd_l;
-        assign out_r = snd_r;
+        assign out_l  = snd_l;
+        assign out_r  = snd_r;
+        assign out2_l = snd2_l;
+        assign out2_r = snd2_r;
     end
 endgenerate
 
