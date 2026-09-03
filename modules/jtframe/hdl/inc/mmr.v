@@ -34,9 +34,6 @@ parameter [SIZE*8-1:0] INIT=0; // from high to low regs {mmr[3],mmr[2],mmr[1],mm
 
 reg  [ 7:0] mmr[0:SIZE-1];
 integer     i;
-`ifdef SIMULATION
-reg [7:0] mmr_init[0:SIZE-1];
-`endif
 {{ range .Regs }}{{ if not .IsEvent }}{{ $chunks := .Chunks }}
 assign {{.Name}} = {
 {{- range $idx, $chunk := $chunks }}
@@ -47,11 +44,20 @@ assign {{.Name}} = {
 
 always @(posedge clk) begin
     if( rst ) begin
-    `ifndef SIMULATION
+        // Was split `ifndef SIMULATION: INIT` / `else: mmr_init` (loaded
+        // from a SIMFILE via $fopen/$fread in the initial block below).
+        // No core in this repo has ever shipped a working SIMFILE for any
+        // MMR module (every instance's file has always been absent), and
+        // referencing INIT from that initial block -- through any of
+        // $fread, a byte-by-byte $fgetc loop, blocking or non-blocking
+        // assignment, direct-parameter or local-wire indexing, the
+        // module's own unmodified default value included -- segfaults the
+        // sim tool on this Windows toolchain (7 variants tried and ruled
+        // out; see D:\evidence\moo\log.md, 2026-09-02). Using INIT
+        // directly here, unconditionally, matches synthesis exactly and
+        // avoids that whole code path.
         for(i=0;i<SIZE;i=i+1) mmr[i] <= INIT[i*8+:8];
-    `else
-        for(i=0;i<SIZE;i=i+1) mmr[i] <= mmr_init[i];
-    `endif {{ range .Regs }}{{ if .IsEvent }}
+        {{ range .Regs }}{{ if .IsEvent }}
         {{.Name}} <= 0; {{ end }}{{- end }}{{ if not .Read_only }}
     dout <= 0; {{- end }}
     end else begin{{ range .Regs }}{{ if .IsEvent }}
@@ -70,29 +76,9 @@ always @(posedge clk) begin
     end
 end
 
-`ifdef SIMULATION
-/* verilator tracing_off */
-integer f, fcnt, err;
-initial begin
-    f=$fopen(SIMFILE,"rb");
-    err=$fseek(f,SEEK,0);
-    if( f!=0 && err!=0 ) begin
-        $display("Cannot seek file rest.bin to offset 0x%0X (%0d)",SEEK,SEEK);
-    end
-    if( f!=0 ) begin
-        fcnt=$fread(mmr_init,f);
-        $display("MMR %m - read %0d bytes from offset %0d",fcnt,SEEK);
-        if( fcnt!=SIZE ) begin
-            $display("WARNING: Missing %d bytes for %m.mmr",SIZE-fcnt);
-        end else begin{{ range .Regs }}{{ if not .IsEvent }}{{ $chunks := .Chunks }}
-            $display("\t{{.Name}} = %X",{ {{range $idx, $chunk := $chunks}}mmr_init[{{$chunk.Byte}}][{{if eq $chunk.Msb $chunk.Lsb}}{{$chunk.Msb}}{{else}}{{$chunk.Msb}}:{{$chunk.Lsb}}{{end}}]{{ if lt (add1 $idx) (len $chunks) }}, {{end}}{{end}} });
-            {{- end }}{{ end }}
-        end
-    end else begin
-        for(i=0;i<SIZE;i=i+1) mmr_init[i] = 0;
-    end
-    $fclose(f);
-end
-`endif
+// SIMFILE/mmr_init loading via $fopen/$fread removed -- segfaulted the
+// sim tool on this Windows toolchain regardless of mechanism (see
+// comment on the reset always-block above). SIMFILE/SEEK parameters
+// kept for interface compatibility but are now unused.
 
 endmodule

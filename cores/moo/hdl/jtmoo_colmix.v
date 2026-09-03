@@ -4,6 +4,19 @@
  * Version: 1.0
  * Date: 17-6-2026 */
 
+// Colour section of the Moo Mesa board
+//   M9  K053251 priority mixer
+//   J3  K054338 colour combiner, owns the palette RAM and the CPU window
+//   G4/H4/J4  three HM6116 (2k x 8) holding R, G and B - the palette is
+//             xRGB_888, matching MAME's palette_device::xRGB_888, 2048
+//
+// The board latches the K053251 outputs (COL0..10, NCOL, BRIT, SDO0/1) in
+// L5/K5 (74LS273) before they reach the K054338. G8/G9/H8/H9 (74LS157) can
+// replace them with the K054157's fourth pipeline, whose I1 inputs are tied
+// so that COL8..10 read as 1 and every mix/shadow qualifier reads as 0. That
+// is the 0x700 palette base MAME hardcodes as m_layer_colorbase[0] = 0x70 for
+// the always-on-top plane 0.
+
 module jtmoo_colmix(
     input             rst,
     input             clk,
@@ -14,28 +27,25 @@ module jtmoo_colmix(
     input             lvbl,
 
     // CPU interface
-    input             pcu_cs,
-    input             reg_cs,
-    input             pal_cs,
+    input             pcu_cs,   // K053251
+    input             reg_cs,   // K054338 registers
+    input             pal_cs,   // palette RAM
     input             cpu_we,
     input      [15:0] cpu_dout,
-    input      [ 7:0] cpu_d8,
     input      [ 1:0] cpu_dsn,
     input      [12:1] cpu_addr,
     output     [15:0] cpu_din,
 
     // Final pixels
-    input      [ 7:0] lyrf_pxl,
-    input      [11:0] lyra_pxl,
-    input      [11:0] lyrb_pxl,
+    input      [11:0] lyrf_pxl, // plane 0, bypasses the K053251
+    input      [11:0] lyra_pxl, // plane 1 -> CI2
+    input      [11:0] lyrb_pxl, // plane 2 -> CI3
+    input      [11:0] lyrc_pxl, // plane 3 -> CI4
     input      [ 8:0] lyro_pxl,
     input      [ 4:0] lyro_pri,
     input             blnk_sel,
 
     input      [ 1:0] shadow,
-    input      [ 2:0] dim,
-    input             dimmod,
-    input             dimpol,
 
     output     [ 7:0] red,
     output     [ 7:0] green,
@@ -44,58 +54,69 @@ module jtmoo_colmix(
     // Debug
     input      [11:0] ioctl_addr,
     input             ioctl_ram,
-    output     [ 7:0] ioctl_din,
+    output reg [ 7:0] ioctl_din,
     output     [ 7:0] dump_mmr,
 
     input      [ 7:0] debug_bus
 );
 
-wire [15:0] pal_dout, pal_cpu_din;
 wire [15:0] k338_dout;
-wire [ 1:0] cpu_palwe;
 reg  [23:0] bgr;
-reg  [ 7:0] r8, b8, g8;
-wire [10:0] pal_addr;
-wire        shad, pcu_we, reg_we, nc, col_n, k338_video_en;
+reg  [ 7:0] r8, g8, b8;
+wire [10:0] col;
+wire        pcu_we, reg_we, col_n, k338_video_en;
 wire signed [9:0] shad_r, shad_g, shad_b;
 wire [23:0] k338_bg;
-// 053251 inputs
+// K053251 inputs
 wire [ 5:0] pri0;
 wire [ 8:0] ci0, ci1, ci2;
 wire [ 7:0] ci3, ci4;
-wire [ 3:0] fcolr, ci2_low;
-wire        fpal4;
 wire [ 1:0] shd_out, shd_in;
+wire        brit;
+// palette RAM
+wire [10:0] pal_addr, cpu_pal_addr;
+wire [ 7:0] pal_r, pal_g, pal_b, cpu_r, cpu_g, cpu_b;
+wire        wr_r, wr_g, wr_b, pal_word;
+// plane 0 bypass
+wire        p0_opaque;
+wire [10:0] mcol;
+wire        mcol_blank;
+wire [ 1:0] mcol_shd;
 reg  [ 1:0] shd_l;
-reg         col_n_l;
+reg         blank_l;
 
-// 8/16 bit interface
-assign cpu_palwe = {2{cpu_we&pal_cs}} & ~cpu_dsn;
-assign pcu_we    = pcu_cs & ~cpu_dsn[0] & cpu_we;
-assign reg_we    = reg_cs & cpu_we & (cpu_dsn!=2'b11);
-assign ioctl_din = ioctl_addr[0] ? pal_dout[7:0] : pal_dout[15:8];
-assign cpu_din   = reg_cs ? k338_dout : pal_cpu_din;
-assign {blue,green,red} = (lvbl & lhbl ) ? bgr : 24'd0;
+// The K054338 sees the palette as xRGB_888, big endian: the even word holds
+// the red byte in D[7:0], the odd word holds green in D[15:8] and blue in
+// D[7:0]
+assign pal_word     = cpu_addr[1];
+assign cpu_pal_addr = cpu_addr[12:2];
+assign wr_r         = pal_cs & cpu_we & ~pal_word & ~cpu_dsn[0];
+assign wr_g         = pal_cs & cpu_we &  pal_word & ~cpu_dsn[1];
+assign wr_b         = pal_cs & cpu_we &  pal_word & ~cpu_dsn[0];
+assign pcu_we       = pcu_cs & ~cpu_dsn[0] & cpu_we;
+assign reg_we       = reg_cs & cpu_we & (cpu_dsn!=2'b11);
+assign cpu_din      = reg_cs   ? k338_dout :
+                      pal_word ? { cpu_g, cpu_b } : { 8'd0, cpu_r };
+assign {blue,green,red} = (lvbl & lhbl) ? bgr : 24'd0;
 
-// 053251 wiring
-assign pri0      = {lyro_pri,1'b1};
-assign ci0       = lyro_pxl;  // {lyra_pxl[6:4],lyra_pxl[11:10],lyra_pxl[3:0]};
-assign ci1       = 9'b0;      // lyro_pxl;
-assign fpal4     = lyrf_pxl[4];
-assign fcolr     = lyrf_pxl[3:0];
-// blnk_sel comes from N6 pin 7. Together with FPAL4 it blanks FCOLR into CI2.
-assign ci2_low   = blnk_sel && fpal4 ? 4'd0 : fcolr;
-assign ci2       = { 1'b0, lyrf_pxl[7:4], ci2_low };
-assign ci3       = lyra_pxl[7:0]; // lyrf_pxl ;
-assign ci4       = lyrb_pxl[7:0];
-assign shad      = |shd_out;
-assign shd_in    =  shadow;
+// K053251 wiring. CI1 is grounded on this board
+assign pri0      = { lyro_pri, 1'b1 };
+assign ci0       = lyro_pxl;
+assign ci1       = 9'd0;
+// CI2 is nine bits wide. With four palette bits per layer FPAL4 is always
+// low, so the N6/H6 gate that would blank FCOLR under blnk_sel never fires
+assign ci2       = { 1'b0, lyra_pxl[7:4], lyra_pxl[3:0] };
+assign ci3       = { 1'b0, lyrb_pxl[6:4], lyrb_pxl[3:0] }; // only CI30..CI36 wired
+assign ci4       = { lyrc_pxl[7:4], lyrc_pxl[3:0] };
+assign shd_in    = shadow;
 
-function [7:0] conv58(input [4:0] cin );
-begin
-    conv58 = {cin, cin[4-:3]};
-end
-endfunction
+// Plane 0 wins over everything when it is opaque and brings its own
+// palette bank, with no shadow, blank or blend qualifier
+assign p0_opaque  = |lyrf_pxl[3:0];
+assign mcol       = p0_opaque ? { 3'b111, lyrf_pxl[7:0] } : col;
+assign mcol_blank = p0_opaque ? 1'b0 : col_n;
+assign mcol_shd   = p0_opaque ? 2'b0 : shd_out;
+assign pal_addr   = mcol;
 
 function [7:0] add_clip(input [7:0] cin, input signed [9:0] delta);
     reg signed [10:0] sum;
@@ -110,18 +131,29 @@ always @(posedge clk, posedge rst) begin
     if( rst ) begin
         bgr     <= 0;
         shd_l   <= 0;
-        col_n_l <= 0;
+        blank_l <= 0;
+        {r8,g8,b8} <= 0;
     end else begin
-        { b8, g8, r8 } <= {conv58(pal_dout[10+:5]),conv58(pal_dout[5+:5]),conv58(pal_dout[0+:5])};
+        { r8, g8, b8 } <= { pal_r, pal_g, pal_b };
         if( pxl_cen ) begin
-            shd_l   <= shd_out;
-            col_n_l <= col_n;
+            shd_l   <= mcol_shd;
+            blank_l <= mcol_blank;
             bgr     <= !k338_video_en ? 24'd0 :
-                       col_n_l        ? k338_bg :
+                       blank_l        ? k338_bg :
                        ~|shd_l        ? { b8, g8, r8 } :
                                         { add_clip(b8,shad_b), add_clip(g8,shad_g), add_clip(r8,shad_r) };
         end
     end
+end
+
+// Palette dump: four bytes per entry, x/R/G/B, covering the low 1024 entries
+always @(posedge clk) begin
+    case( ioctl_addr[1:0] )
+        2'd0: ioctl_din <= 8'd0;
+        2'd1: ioctl_din <= pal_r;
+        2'd2: ioctl_din <= pal_g;
+        default: ioctl_din <= pal_b;
+    endcase
 end
 
 jt054338 u_k338(
@@ -135,7 +167,8 @@ jt054338 u_k338(
     .dsn         ( cpu_dsn         ),
     .dout        ( k338_dout       ),
 
-    .pblend      ( 2'd1            ),
+    // MIX0 on the board is COL8 & ~COL9 & ~COL10 out of the K053251
+    .pblend      ( { 1'b0, mcol[8] & ~mcol[9] & ~mcol[10] } ),
     .shadow      ( shd_l           ),
 
     .bg_rgb      ( k338_bg         ),
@@ -179,45 +212,56 @@ jtcolmix_053251 u_k251(
     .ioctl_addr ( ioctl_ram ? ioctl_addr[3:0] : debug_bus[3:0] ),
     .ioctl_din  ( dump_mmr  ),
 
-    .cout       ( pal_addr  ),
-    .brit       (           ),
+    .cout       ( col       ),
+    .brit       ( brit      ),
     .col_n      ( col_n     )
 );
 
-// this does not follow the same arrangement of the original
-// it's only important if you try to load a dump from MAME
-jtframe_dual_nvram #(.AW(11),.SIMFILE("pal_hi.bin")) u_ramlo(
-    // Port 0: CPU
-    .clk0   ( clk           ),
-    .data0  ( cpu_dout[7:0] ),
-    .addr0  ( cpu_addr[11:1]),
-    .we0    ( cpu_palwe[0]  ),
-    .q0     ( pal_cpu_din[7:0]),
-    // Port 1
-    .clk1   ( clk           ),
-    .data1  ( 8'd0          ),
-    .addr1a ( pal_addr      ),
-    .addr1b (ioctl_addr[11:1]),
-    .sel_b  ( ioctl_ram     ),
-    .we_b   ( 1'b0          ),
-    .q1     ( pal_dout[ 7:0])
-);
-
-jtframe_dual_nvram #(.AW(11),.SIMFILE("pal_lo.bin")) u_ramhi(
-    // Port 0: CPU
+// G4: green plane
+jtframe_dual_ram #(.AW(11),.SIMFILE("pal_g.bin")) u_pal_g(
     .clk0   ( clk           ),
     .data0  ( cpu_dout[15:8]),
-    .addr0  ( cpu_addr[11:1]),
-    .we0    ( cpu_palwe[1]  ),
-    .q0     ( pal_cpu_din[15:8] ),
-    // Port 1
+    .addr0  ( cpu_pal_addr  ),
+    .we0    ( wr_g          ),
+    .q0     ( cpu_g         ),
     .clk1   ( clk           ),
     .data1  ( 8'd0          ),
-    .addr1a ( pal_addr      ),
-    .addr1b (ioctl_addr[11:1]),
-    .sel_b  ( ioctl_ram     ),
-    .we_b   ( 1'b0          ),
-    .q1     ( pal_dout[15:8] )
+    .addr1  ( ioctl_ram ? {1'b0,ioctl_addr[11:2]} : pal_addr ),
+    .we1    ( 1'b0          ),
+    .q1     ( pal_g         )
 );
+
+// H4: red plane
+jtframe_dual_ram #(.AW(11),.SIMFILE("pal_r.bin")) u_pal_r(
+    .clk0   ( clk           ),
+    .data0  ( cpu_dout[7:0] ),
+    .addr0  ( cpu_pal_addr  ),
+    .we0    ( wr_r          ),
+    .q0     ( cpu_r         ),
+    .clk1   ( clk           ),
+    .data1  ( 8'd0          ),
+    .addr1  ( ioctl_ram ? {1'b0,ioctl_addr[11:2]} : pal_addr ),
+    .we1    ( 1'b0          ),
+    .q1     ( pal_r         )
+);
+
+// J4: blue plane
+jtframe_dual_ram #(.AW(11),.SIMFILE("pal_b.bin")) u_pal_b(
+    .clk0   ( clk           ),
+    .data0  ( cpu_dout[7:0] ),
+    .addr0  ( cpu_pal_addr  ),
+    .we0    ( wr_b          ),
+    .q0     ( cpu_b         ),
+    .clk1   ( clk           ),
+    .data1  ( 8'd0          ),
+    .addr1  ( ioctl_ram ? {1'b0,ioctl_addr[11:2]} : pal_addr ),
+    .we1    ( 1'b0          ),
+    .q1     ( pal_b         )
+);
+
+`ifdef SIMULATION
+wire unused_colmix = &{ 1'b0, brit, blnk_sel, lyrb_pxl[7], lyrf_pxl[11:8],
+                        lyra_pxl[11:8], lyrb_pxl[11:8], lyrc_pxl[11:8] };
+`endif
 
 endmodule

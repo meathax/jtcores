@@ -17,9 +17,9 @@ module jtmoo_main(
     output        [15:0] cpu_dout,
     // 8-bit interface
     output               cpu_we,
-    output reg           pal_cs,
-    output reg           pcu_cs,
-    output reg           col_cs,
+    output reg           pal_cs,   // palette RAM, seen through the K054338
+    output reg           pcu_cs,   // K053251
+    output reg           k338_cs,  // K054338 registers
     // Sound interface
     output               pair_we,   // K054321 PAIR~{CS} write
     input         [ 7:0] pair_dout, // K054321 PAIR~{CS} read
@@ -28,7 +28,7 @@ module jtmoo_main(
     output reg           rom_cs,
     output reg           ram_cs,
     output reg           vram_cs,
-    output reg           obj_cs,
+    output                oram_cs,  // object RAM CPU window, 0x190000-0x19FFFF
     output reg           scr_cs,
 
     input         [15:0] oram_dout,
@@ -39,7 +39,6 @@ module jtmoo_main(
     input                ram_ok,
     input                rom_ok,
     input                vdtac,
-    input                tile_irqn,
     output               ram_we,
 
     output reg           cco_cs,
@@ -51,7 +50,7 @@ module jtmoo_main(
     output reg           objreg_cs,
     output reg           scrreg_cs,
     output reg           objcha_n,
-    output               rmrd,
+    output reg           rmrd_cs,  // graphics ROM read-back window
     output reg           blnk_sel,
     input                dma_bsy,
     // EEPROM
@@ -76,58 +75,73 @@ module jtmoo_main(
 `ifndef NOMAIN
 wire [23:1] A;
 wire        cpu_cen, cpu_cenb;
-wire        UDSn, LDSn, RnW, allFC, ASn, VPAn, DTACKn;
+wire        UDSn, LDSn, RnW, ASn, VPAn, DTACKn;
 wire [ 2:0] FC;
 reg  [ 2:0] IPLn;
-reg  [ 3:0] dtac_reg=0;
-reg         cab_cs, iowr_hi, iowr_lo, HALTn,
+reg         cab_cs, HALTn,
             eep_di, eep_clk, eep_cs, intdma_enb,
-            sndon_r, pair_cs, reg_cs;
-reg  [15:0] cpu_din, cab_dout;
+            pair_cs, reg_cs;
+reg  [15:0] cpu_din, cab_dout, cur_ctrl2;
 reg  [ 7:0] io_dout;
 wire [ 7:0] hip_dout;
 wire        eep_rdy, eep_do, bus_cs, bus_busy, BUSn;
-wire        dtac_mux, intdma, IPLn1;
+wire        dtac_mux, intdma;
+wire [15:0] cpu_dout_68k;
+wire [23:1] a_mx;
+wire        asn_mx;
+wire [ 1:0] dsn_mx;
 
-`ifdef SIMULATION
-wire [23:0] A_full = {A,1'b0};
-`endif
 /* verilator tracing_on */
-assign main_addr= A[20:1];
-assign ram_dsn  = {UDSn, LDSn};
-assign ram_we   = ram_cs & ~RnW & ~&ram_dsn;
-assign bus_cs   = rom_cs | ram_cs;
-assign bus_busy = (rom_cs & ~rom_ok) | (ram_cs & ~ram_ok);
-assign BUSn     = ASn | (LDSn & UDSn);
+// Bus-master mux: the 053990 (jtriders_tmnt2) can take real bus mastership
+// for its DMA block-copy (BRn/BGACKn wired to the CPU's own arbitration
+// pins below). While it holds the bus (prot_bgackn low) the address, byte
+// strobes, write-data and write-enable the memory subsystem sees must come
+// from the 053990's own bus_addr/bus_dsn/bus_din/bus_wrn, not the 68000's
+// (which is not actually driving the bus during that window). Pattern
+// follows cores/riders/hdl/jtriders_main.v (a_mx/asn_mx/tmnt_dout/bus_din).
+// Evidence: main.kicad_sch shows BRn/BGACKn wired straight to N4 (053990);
+// prot_addr/prot_asn/prot_dsn were previously declared but never used here
+// (schematic audit GAP-3, D:\evidence\moo\audit\sch\main.md). 053990 bus
+// timing itself is not fully reverse-engineered (SiliconRE WIP) so this
+// mux is a structural fix only -- HYPOTHESIS on exact cycle timing.
+assign a_mx     = prot_bgackn ? A            : prot_addr;
+assign asn_mx   = prot_bgackn ? ASn          : prot_asn;
+assign dsn_mx   = prot_bgackn ? {UDSn, LDSn} : prot_dsn;
+assign rw       = prot_bgackn ? RnW          : prot_wrn;
+
+assign main_addr= a_mx[20:1];
+assign ram_dsn  = dsn_mx;
+assign ram_we   = ram_cs & ~rw & ~&ram_dsn;
+assign bus_cs   = rom_cs | ram_cs | rmrd_cs;
+assign bus_busy = (rom_cs & ~rom_ok) | (ram_cs & ~ram_ok) | (rmrd_cs & ~vdtac);
+assign BUSn     = asn_mx | (dsn_mx[1] & dsn_mx[0]);
 assign VPAn     = ~vpa;
 
-assign cpu_we   = ~RnW;
-assign oram_we  = ~ram_dsn & {2{rw & oram_wr}};
+assign cpu_we   = prot_bgackn ? ~RnW : ~prot_wrn;
+assign cpu_dout = prot_bgackn ? cpu_dout_68k : prot_din;
+// oram_we/oram_cs: 0x190000-0x19FFFF sprite RAM window (055373 ORAMWE term).
+// Board strobes ORAM~WEL/WEH assert only on a write cycle (R/W low); rw
+// follows the 68000 RnW convention (1=read), so the write gate is ~rw, not
+// rw as before. See D:\evidence\moo\audit\sch\main.md GAP-1/objects.md GAP-4.
+assign oram_we  = ~ram_dsn & {2{~rw & oram_wr}};
+assign oram_cs  =  oram_wr & ~BUSn;
 
-assign st_dout  = 0; //{ rmrd, 1'd0, prio, div8, game_id };
-// assign VPAn     = ~&{ FC[1:0], ~ASn };
-assign dtac_mux = DTACKn /*| ~vdtac | ~dtac_reg[0]*/;
-assign IPLn1    = ~intdma | tile_irqn;
+assign st_dout  = 0; // status byte permanently zero; debug-only, no consumer wires it up
+assign dtac_mux = DTACKn;
 assign pair_we  = pair_cs && !RnW && !LDSn;
-// Temporary scroll wrapper does not implement tile ROM readout yet.
-assign rmrd     = 1'b0;
 
-assign rw = RnW | prot_wrn;
-
-reg none_cs, hip_cs, io_cs;
-reg [1:0] bank;
-reg vpa, oram_wr, pre_dtac, prio, dec_en;
+reg none_cs, hip_cs, io_cs, obj_cs;
+reg vpa, oram_wr, dec_en;
 always @* begin
     rom_cs   = 0;
     ram_cs   = 0;
+    rmrd_cs  = 0;
     vpa      = 0;
     oram_wr  = 0;
     scr_cs   = 0;
-    pre_dtac = 0;
-    prio     = 0;
     dec_en   = 0;
     scrreg_cs= 0;
-    col_cs   = 0;
+    k338_cs  = 0;
     obj_cs   = 0;
     objreg_cs= 0;
     reg_cs   = 0;
@@ -141,38 +155,39 @@ always @* begin
     cab_cs   = 0;
     io_cs    = 0;
     pal_cs   = 0;
-    if(!ASn) begin
-        if(A[23]) begin
-            vpa = 1;
-        end else if(A[22:21]==0) begin
-            // 055373 - PAL20L10 (from PAL equations)
-            casez( A[20:14] )
-                7'b110_01??: oram_wr  = 1;     // ORAMWE
-                7'b110_1100: pre_dtac = ~BUSn; // PRE_DTACK / tile ROM read window
-                7'b110_1000: begin             // LYR_PRIO / tile RAM window
-                    prio   = 1;
-                    scr_cs = ~BUSn;
-                end
-                7'b110_00??: ram_cs   = ~BUSn;
-                7'b011_0???: dec_en   = 1;     // PALE
-                7'b00?_????: rom_cs   = 1;     // ~OE1 in sch
-                7'b10?_????: rom_cs   = 1;     // ~OE2 in sch
-                7'b111_0???: col_cs   =~BUSn;  // RAMCS in sch // to colmix 054338
-                default:;
-            endcase
-            // o23 = !A[20] | !A[19] | (!A[18] & !A[17])
-        end
+    // Address decode runs off the muxed bus (a_mx/asn_mx) so it correctly
+    // serves both the 68000's own cycles and the 053990's DMA cycles when
+    // it holds the bus (prot_bgackn low) -- see the a_mx/asn_mx/dsn_mx mux
+    // above (A7). VPA/autovector stays tied to the CPU's own ASn/A: the
+    // 053990 never generates an interrupt-acknowledge cycle.
+    if(!ASn && A[23]) vpa = 1;
+    if(!asn_mx && a_mx[22:21]==0) begin
+        // 055373 - PAL20L10 (from PAL equations)
+        casez( a_mx[20:14] )
+            7'b110_01??: oram_wr  = 1;     // ORAMWE
+            7'b110_1100: rmrd_cs  = ~BUSn; // PRE_DTACK: tile ROM read-back
+            7'b110_1000: scr_cs   = ~BUSn; // LYR_PRIO: tile RAM window
+            7'b110_00??: ram_cs   = ~BUSn;
+            7'b011_0???: dec_en   = 1;     // PALE
+            7'b00?_????: rom_cs   = 1;     // ~OE1 in sch
+            7'b10?_????: rom_cs   = 1;     // ~OE2 in sch
+            7'b111_0000: pal_cs   =~BUSn;  // RAMCS: palette RAM through the K054338
+            default:;
+        endcase
     end
     if(dec_en) begin
-        case (A[16:13])
-            4'h0: scrreg_cs = 1;     // ROMCS in sch // to scroll
-            4'h1: objreg_cs = 1;     // REG
-            4'h2: obj_cs    = 1;     // CRCS
-            4'h5: pal_cs    = 1;     // REGCS // to colmix 054338
+        case (a_mx[16:13])
+            4'h0: scrreg_cs = ~BUSn; // ROMCS in sch // to scroll
+            4'h1: objreg_cs = ~BUSn; // REG
+            4'h2: obj_cs    = ~BUSn; // CRCS: 053246 ROM read-back register
+            4'h5: k338_cs   = 1;     // REGCS: K054338 registers
             4'h6: pcu_cs    = 1;     // PCUCS // to colmix 053251
             4'h7: prot_cs   = ~BUSn; // OBJ_REG_SEL
 
-            4'h8: cco_cs  = ~BUSn; // /CCO
+            // CCU (053252) is 8-bit only (real board wires DB0-7 alone),
+            // so gate on the low data strobe -- an upper-byte-only write
+            // must not touch the CCU register file. D7.
+            4'h8: cco_cs  = ~BUSn & ~dsn_mx[0]; // /CCO
             4'h9: hip_cs  = ~BUSn & bucky; // COLCS
             4'hA: sndon   = ~BUSn; // SDON
             4'hB: pair_cs = ~BUSn; // PAIRCS
@@ -184,8 +199,8 @@ always @* begin
         endcase
     end
 `ifdef SIMULATION
-    none_cs = ~BUSn & ~|{rom_cs, ram_cs, pal_cs, io_cs, prot_cs,
-        cab_cs, vram_cs, scr_cs, scrreg_cs, obj_cs, objreg_cs, sndon, pcu_cs, reg_cs};
+    none_cs = ~BUSn & ~|{rom_cs, ram_cs, pal_cs, io_cs, prot_cs, k338_cs, hip_cs, rmrd_cs,
+        cab_cs, vram_cs, scr_cs, scrreg_cs, obj_cs, objreg_cs, sndon, pcu_cs, reg_cs, cco_cs};
 `endif
 end
 
@@ -201,7 +216,14 @@ always @(posedge clk) begin
     IPLn <= 3'b111;
     if(!intdma)
         IPLn <= 3'b010;
-    else if (!int1)
+    // int1 comes from jtk053252's jtframe_edge with the default QSET=1, so
+    // it is active high (1 = INT1 pending until the CPU acks it). The real
+    // PCB's INT1 pin is active low into the LS148, but the RTL module has
+    // already inverted that. Testing !int1 here left level 4 asserted only
+    // while idle and never once INT1 was pending, so the ISR never ran,
+    // never acked, and int1 stuck high forever (boot waits on the ISR
+    // clearing a RAM flag at 0x18004A, verified by MAME disassembly).
+    else if (int1)
         IPLn <= 3'b011;
     else if (!prot_irqn)
         IPLn <= 3'b100;
@@ -209,28 +231,30 @@ always @(posedge clk) begin
     HALTn   <= dip_pause & ~rst;
     cpu_din <= rom_cs  ? rom_data        :
                ram_cs  ? ram_dout        :
-               obj_cs  ? oram_dout       :
-               (vram_cs | scr_cs | scrreg_cs) ? vram_dout :
-               pal_cs  ? pal_dout        :
-               reg_cs  ? pal_dout        :
+               (obj_cs|oram_cs) ? oram_dout : // 0x0C4000 ROM read-back reg
+                                               // and 0x190000 sprite RAM (A2)
+               (vram_cs | scr_cs | scrreg_cs | rmrd_cs) ? vram_dout :
+               (pal_cs|k338_cs) ? pal_dout :
+               reg_cs  ? cur_ctrl2       :
+               cco_cs  ? {8'd0,vtimer_mmr}: // 053252 CCU read-back (A6)
                prot_cs ? prot_din        :
                pair_cs ? {8'd0,pair_dout}:
                io_cs   ? {8'd0,io_dout  }:
                cab_cs  ? cab_dout        : 16'hffff;
 end
 
-reg fake_dma=0, cabcs_l;
-
 always @(posedge clk) begin
-    if( cpu_cen ) begin
-        cabcs_l <= cab_cs;
-        if( !cab_cs && !cabcs_l ) fake_dma <= ~fake_dma;
-    end
-    cab_dout <= A[1] ? { cab_1p[2], joystick3, cab_1p[0], joystick1 }:
-                       { cab_1p[3], joystick4, cab_1p[1], joystick2 };
+    // PSACA1 = MAIN_A1 through two series inverters (io_cabinet.kicad_sch
+    // G6.1/M6.1); the 74LS257 select is A1 itself, low = P1/P3, high =
+    // P2/P4 -- matches doc/moo.cpp:569-570 (0x0DA000=P1_P3, 0x0DA002=
+    // P2_P4). Previously inverted (A5), which sent every 1P/3P/2P/4P
+    // input, including start and coin, to the wrong address.
+    cab_dout <= A[1] ? { cab_1p[3], joystick4, cab_1p[1], joystick2 }:
+                       { cab_1p[2], joystick3, cab_1p[0], joystick1 };
     io_dout  <= A[1] ? { dipsw, dip_test, 1'b1, eep_rdy, eep_do }:
                        { service , coin };
 end
+
 
 always @(posedge clk, posedge rst) begin
     if( rst ) begin
@@ -240,15 +264,22 @@ always @(posedge clk, posedge rst) begin
         intdma_enb <= 1;
         objcha_n   <= 1;
         blnk_sel   <= 0;
-        dtac_reg   <= 0;
+        cur_ctrl2  <= 0;
     end else begin
-        dtac_reg <= {pre_dtac, dtac_reg[3:1]};
-        if(RnW) begin
-            if( !LDSn ) { intdma_enb, eep_clk, eep_cs, eep_di } <= {cpu_dout[5],cpu_dout[2:0]};
-        end
-        if( !UDSn & reg_cs ) begin
-            objcha_n <= ~cpu_dout[8];
-            blnk_sel <=  cpu_dout[9];
+        // 0x0DE000 control2: Q4 (74LS174) low byte, N6 (74LS175) high byte.
+        // Qualified on the muxed rw/dsn_mx so a (never expected) 053990
+        // DMA access here would be handled consistently; normal operation
+        // is bit-identical to using RnW/LDSn/UDSn directly.
+        if( reg_cs & ~rw ) begin
+            if( !dsn_mx[0] ) begin
+                cur_ctrl2[ 7:0] <= cpu_dout[7:0];
+                { intdma_enb, eep_clk, eep_cs, eep_di } <= {cpu_dout[5],cpu_dout[2:0]};
+            end
+            if( !dsn_mx[1] ) begin
+                cur_ctrl2[15:8] <= cpu_dout[15:8];
+                objcha_n <= ~cpu_dout[8];
+                blnk_sel <=  cpu_dout[9];
+            end
         end
     end
 end
@@ -328,7 +359,12 @@ jtframe_68kdtack_cen #(.W(6),.RECOVERY(1)) u_dtack(
     .bus_cs     ( bus_cs    ),
     .bus_busy   ( bus_busy  ),
     .bus_legit  ( 1'b0      ),
-    .bus_ack    ( 1'b0      ),
+    // 053990 (jtriders_tmnt2) can take real bus mastership for its DMA
+    // block-copy (BRn/BGACKn wired straight to the CPU's own arbitration
+    // pins below). While it holds the bus the 68000 isn't actually
+    // stalled by ROM/RAM latency -- bus_ack tells the recovery accounting
+    // not to charge that window as debt to be recovered later.
+    .bus_ack    ( ~prot_bgackn ),
     .ASn        ( ASn       ),
     .DSn        ({UDSn,LDSn}),
     .num        ( 5'd1      ),  // numerator
@@ -351,7 +387,7 @@ jtframe_m68k u_cpu(
     // Buses
     .eab        ( A           ),
     .iEdb       ( cpu_din     ),
-    .oEdb       ( cpu_dout    ),
+    .oEdb       ( cpu_dout_68k),
 
 
     .eRWn       ( RnW         ),
@@ -387,11 +423,12 @@ jtframe_m68k u_cpu(
     //     end
     // end
     initial begin
-        obj_cs    = 0;
         objcha_n  = 1;
         objreg_cs = 0;
         pal_cs    = 0;
         pcu_cs    = 0;
+        k338_cs   = 0;
+        rmrd_cs   = 0;
         reg_cs    = 0;
         ram_cs    = 0;
         rom_cs    = 0;
@@ -407,6 +444,7 @@ jtframe_m68k u_cpu(
         nv_addr   = 0,
         nv_din    = 0,
         pair_we   = 0,
+        oram_cs   = 0,
         nv_we     = 0;
 `endif
 endmodule

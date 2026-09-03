@@ -16,8 +16,7 @@ data = [
 	{ machine="moomesa", offset=15, data="01" },
     { machine="bucky",   offset=15, data="02" },
 ]
-# offset = { bits=12, reverse=true, regions=["maincpu","audiocpu","k052109", "obj"] }
-# frames = [ { width=8 }, ]
+offset = { bits=12, reverse=true, regions=["maincpu","soundcpu","tiles","obj"] }
 
 [ROM]
 regions = [

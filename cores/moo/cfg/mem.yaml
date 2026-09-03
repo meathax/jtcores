@@ -1,5 +1,5 @@
 params:
-  - { name: RAM_OFFSET,   value: "22'h100000" }
+  - { name: RAM_OFFSET,   value: "22'h120000" }
   - { name: PCM_OFFSET,   value: "22'h040000>>1" }
 clocks:
   clk48:
@@ -28,6 +28,7 @@ sdram:
         - name: main
           addr_width: 21
           data_width: 16
+          cache_size: 1kB
     - buses:
         - name: snd
           addr_width: 18
@@ -44,6 +45,9 @@ sdram:
           addr_width: 21
           data_width: 32
         - name: lyrb
+          addr_width: 21
+          data_width: 32
+        - name: lyrc
           addr_width: 21
           data_width: 32
     - buses:

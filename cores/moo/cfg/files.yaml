@@ -4,6 +4,7 @@ moo:
 jt05415x:
   - get:
     - jt05415x.v
+    - jt054157.v
     - jt054156_mmr.v
     - jt054157_mmr.v
 riders:
@@ -15,7 +16,6 @@ riders:
 rungun:
   - get:
     - jtk053252.v
-    - jtrungun_sound.v
 simson:
   - get:
     - jt053246.sv
@@ -52,6 +52,7 @@ jtframe:
     get:
       - jtframe_dual_nvram.v
       - jtframe_dual_nvram16.v
+jt51:
 jt539:
 jteeprom:
   - get:

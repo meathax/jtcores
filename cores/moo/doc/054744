@@ -1,0 +1,94 @@
+Konami 054744 (PAL16L8) - sound board Z80 address decoder, position E7
+PWB353126 (Moo Mesa / Bucky O'Hare), also used on Bucky O'Hare, Xexex and
+Premier Soccer with the same K039 PCM + YM2151 FM sound-board architecture.
+
+Pin assignments: KNOWN, from the moo/sch/moomesa/sound.kicad_sch capture
+(net dump D:\evidence\moo\snd.txt).
+
+Equations: KNOWN, decoded 2026-09-03 from the real fusemap
+D:\evidence\moo\pld\054744\Konami_054744.jed (CUPL, device g16v8s, dumped
+2013 by Caius, tested on Bucky O'Hare/Xexex/Premier Soccer boards) with
+D:\evidence\moo\jed2.py. This supersedes the previous INFERRED (MAME-range-
+derived) version of this file, which had three concrete mistakes -- see
+"Corrections" below.
+
+Inputs:
+
+1  - /M1     (Z80 ~M1)
+2  - /RD     (Z80 ~RD)
+3  - /RFSH   (Z80 ~RFSH)
+4  - /MREQ   (Z80 ~MREQ)
+5  - A15
+6  - A14
+7  - A13
+8  - A12
+9  - A11
+11 - A10
+
+Outputs (all active low, combinational):
+
+12 - SND~PAL8   - real signal, wired to K054321 pin 24 (see below), NOT unused
+13 - NC         - a spare duplicate of /SROM minus the /RD term
+14 - /SBANK_WR  - bank/NMI latch clock (D7, 74LS174)
+15 - /SLATCHES  - K054321 sound-latch select
+16 - /FM        - YM2151 select
+17 - /PCM       - K054539 register select
+18 - /SRAM      - MB8464 work RAM select
+19 - /SROM      - program ROM (banked, F5 27C020) select
+
+Equations, decoded directly from the JED (product terms OR'd, all active low):
+
+/SROM     = !( /RD & /RFSH_hi... )  -- see exact form below; effective range 0000-BFFF
+            !( !RD & RFSH & !MREQ & !A15 &  A14
+             + !RD & RFSH & !MREQ & !A14 )
+/SRAM     = !( RFSH & !MREQ &  A15 &  A14 & !A13 )                         ; C000-DFFF
+/PCM      = !( RFSH & !MREQ &  A15 &  A14 &  A13 & !A12 & !A11 )           ; E000-E7FF
+/FM       = !( RFSH & !MREQ &  A15 &  A14 &  A13 & !A12 &  A11 )           ; E800-EFFF
+/SLATCHES = !( RFSH & !MREQ &  A15 &  A14 &  A13 &  A12 & !A11 )           ; F000-F7FF
+/SBANK_WR = !( RFSH & !MREQ &  A15 &  A14 &  A13 &  A12 &  A11 & !A10 )    ; F800-FBFF
+pin13(NC) = !( RFSH & !MREQ & !A15 &  A14  +  RFSH & !MREQ & !A14 )        ; spare, tracks /SROM minus /RD
+SND/PAL8  = !( A15 & A14 & A13 & !A12 & A11 & A10                          ; EC00-EFFF (YM2151 access)
+             + /M1 & !A15 & A14                                            ; M1 fetch, 4000-7FFF
+             + /M1 & !A14 )                                                ; M1 fetch, 0000-3FFF & 8000-BFFF
+
+(RFSH here means the /RFSH pin at logic 1, i.e. "not refreshing"; MREQ
+means the /MREQ pin at logic 0, i.e. asserted; /RD means the /RD pin at 0.)
+
+Note that /PCM, /FM and /SLATCHES equations do NOT include A10 at all --
+each real window is twice the width the address-range comment above
+suggests naively (0x800 bytes, not 0x400), i.e. E000-E7FF, E800-EFFF,
+F000-F7FF respectively, each an exact mirror pair across the A10 bit.
+/SBANK_WR does include A10 (the only one of the four F800-region outputs
+that does), giving it the expected 0x400-byte window F800-FBFF.
+
+Wired destinations (from the schematic, KNOWN):
+
+SND/PAL8 -> J2 pin a39/b39 (054986A daughterboard connector) -> U2.24, the
+K054321's pin literally labelled SND~{PAL8} on this schematic. Asserted
+during every YM2151 access (EC00-EFFF) and during every Z80 opcode fetch
+(M1 cycle) from the whole ROM area (0000-BFFF banked program ROM). What the
+K054321 does with this pin is not established from either the schematic or
+MAME's k054321.cpp model (which has no equivalent input) -- the most
+plausible reading is a "sound CPU alive/fetching" status the main CPU or
+the 054986A hybrid's own logic can sample, but this is HYPOTHESIS.
+
+Corrections versus the previous (INFERRED) version of this file:
+
+1. /PCM, /FM and /SLATCHES previously used A[15:10] (6-bit) compares,
+   giving half-width windows that omit A10's mirror. The real fusemap has
+   no A10 term for any of the three. cores/moo/hdl/jtmoo_sound.v corrected
+   to A[15:11] (5-bit) compares, 2026-09-03.
+2. /SBANK_WR was previously commented "write only, gated externally by
+   /WR" -- the real fusemap has no /RD or /WR term at all; the 74LS174
+   clocks on the decode itself (any access to F800-FBFF), not specifically
+   a write. jtmoo_sound.v corrected to latch on the trailing edge of the
+   bare decode, not `bank_we && !wr_n`, 2026-09-03.
+3. Pin 12 (SND~PAL8) was previously documented "unused/NC on this board".
+   It is a real, wired output (see above). Not yet modelled in RTL --
+   cores/riders/hdl/jt054321.v has no equivalent port. See
+   D:\evidence\moo\audit\sch\sound_pcm.md GAP-5.
+
+/M1 and /RD participate only in the /SROM and spare pin-13 terms (an
+interrupt-acknowledge-cycle qualifier on ROM output) and in SND~PAL8's
+M1-fetch terms; neither the RTL's rom_cs nor the SND~PAL8 function (not yet
+modelled) currently uses /M1.

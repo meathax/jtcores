@@ -25,8 +25,24 @@
 #include "wavewritter.h"
 
 #include <sys/types.h>
+#ifndef _WIN32
+// The frame-to-PNG dump path below forks a child and reaps it with wait().
+// MinGW/UCRT64 (native Windows) has no fork()/wait() and no sys/wait.h;
+// on that platform the raw frame is still written, just not piped through
+// ImageMagick's `convert` into a PNG.
 #include <unistd.h>
 #include <sys/wait.h>
+#endif
+
+// MinGW/UCRT64's mkdir() takes only a path, unlike POSIX's mkdir(path,mode);
+// the mode is meaningless on a Windows filesystem anyway.
+static inline int portable_mkdir(const char *path) {
+#ifdef _WIN32
+    return mkdir(path);
+#else
+    return mkdir(path, 0775);
+#endif
+}
 
 #ifdef _DUMP
     #include "verilated_vcd_c.h"
@@ -792,7 +808,7 @@ void JTSim::cabinet_dump() {
     const string scene_root = "scenes";
     const string scene_dir = scene_root + "/" + to_string(frame_cnt);
     auto make_directory = [](const string& path) {
-        if( mkdir(path.c_str(), 0775) == 0 ) return true;
+        if( portable_mkdir(path.c_str()) == 0 ) return true;
         if( errno != EEXIST ) return false;
         struct stat status;
         return stat(path.c_str(), &status) == 0 && S_ISDIR(status.st_mode);
@@ -938,7 +954,26 @@ void JTSim::video_dump() {
                 dump.reset();
                 int CCW = (coremod&4)>>2;
                 CCW ^= game.dip_flip&1;
-                if( dump.diff() ) {
+                // activew/activeh are measured from LHBL/LVBL toggle counts,
+                // independent of dump.buffer's fixed VIDEO_BUFLEN capacity
+                // (push() itself is bounded, but this length computation is
+                // not). A core whose video timing has not yet settled --
+                // e.g. the first frame or two after a CRTC register write,
+                // before hblank/vblank periods stabilise -- can measure an
+                // active area larger than VIDEO_BUFLEN, and reading/writing
+                // that many bytes from the fixed buffer overruns it. Skip
+                // the dump instead of reading past the buffer; found via a
+                // real SIGSEGV (out-of-bounds read in calcCRC32, called
+                // from here) on cores/moo's very first post-reset frame.
+                // See D:\evidence\moo\log.md, 2026-09-03.
+                bool len_sane = activew>0 && activeh>0 && (long long)activew*activeh<=VIDEO_BUFLEN;
+                if( !len_sane ) {
+                    fprintf(stderr, "WARNING: (test.cpp) skipped video dump, "
+                        "measured frame %dx%d exceeds VIDEO_BUFLEN=%d (video "
+                        "timing not settled yet)\n", activew, activeh, VIDEO_BUFLEN);
+                }
+                if( len_sane && dump.diff() ) {
+#ifndef _WIN32
                     if( fork()==0 ) {
                         int len = (activew*activeh)<<2;
                         storeCRC(dump.prev_buffer(),len);
@@ -958,6 +993,17 @@ void JTSim::video_dump() {
                         }
                         exit(0);
                     }
+#else
+                    // No fork()/wait() on native Windows: write the raw
+                    // frame only, skipping the ImageMagick PNG conversion.
+                    int len = (activew*activeh)<<2;
+                    storeCRC(dump.prev_buffer(),len);
+                    dump.fout.open("frame.raw",ios_base::binary);
+                    if( dump.fout.good() ) {
+                        dump.fout.write( dump.prev_buffer(), len );
+                        dump.fout.close();
+                    }
+#endif
                 }
             }
             LVBLl = game.LVBL;
@@ -984,7 +1030,34 @@ void report_vrate( float vrate ) {
     framerate.close();
 }
 
+// Verilator's runtime references this weak SystemC hook even when SystemC
+// integration is off (VM_SC=0); the simulator otherwise fails to link with
+// "undefined reference to sc_time_stamp()". Every non-SystemC Verilator
+// testbench is expected to supply one; time isn't otherwise used from it.
+double sc_time_stamp() { return 0; }
+
+#ifdef JTFRAME_SIGSEGV_BACKTRACE
+#include <csignal>
+#include <windows.h>
+#include <dbghelp.h>
+static void jtframe_segv_handler(int) {
+    void* frames[64];
+    USHORT n = CaptureStackBackTrace(0, 64, frames, nullptr);
+    uintptr_t base = (uintptr_t)GetModuleHandle(nullptr);
+    fprintf(stderr, "\n=== SIGSEGV backtrace (%u frames, module base %p, file-relative addr = 0x140000000 + (frame-base)) ===\n", n, (void*)base);
+    for (USHORT i = 0; i < n; i++)
+        fprintf(stderr, "%p  rva=0x%llx  fileaddr=0x%llx\n", frames[i],
+                (unsigned long long)((uintptr_t)frames[i]-base),
+                (unsigned long long)(0x140000000ULL + ((uintptr_t)frames[i]-base)));
+    fflush(stderr);
+    _exit(139);
+}
+#endif
+
 int main(int argc, char *argv[]) {
+#ifdef JTFRAME_SIGSEGV_BACKTRACE
+    signal(SIGSEGV, jtframe_segv_handler);
+#endif
     VerilatedContext context;
     context.commandArgs(argc, argv);
     makeCRCTable();
@@ -1007,9 +1080,11 @@ int main(int argc, char *argv[]) {
 #endif
             }
         }
-        while(wait(NULL) != -1);
+#ifndef _WIN32
+        while(wait(NULL) != -1); // reap the frame-dump children forked above
+#endif
 #ifdef _COVERAGE
-        mkdir("logs",0755)==0;
+        portable_mkdir("logs")==0;
         Verilated::threadContextp()->coveragep()->write("logs/coverage.dat");
 #endif
         report_vrate( sim.vrate );

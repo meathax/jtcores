@@ -12,26 +12,26 @@ localparam MOOMESA = 0,
            BUCKY   = 1;
 
 /* verilator tracing_off */
-wire        snd_irq, rmrd, rst8, rst_snd, dma_bsy,
-            pal_cs, cpu_we, tilesys_cs, objsys_cs, pcu_cs, col_cs, objcha_n,
-            cpu_rnw, vdtac, tile_irqn, tile_nmin,
+wire        snd_irq, rmrd_cs, rst8, rst_snd, dma_bsy,
+            pal_cs, cpu_we, tilesys_cs, objsys_cs, pcu_cs, k338_cs, objcha_n,
+            vdtac, flip,
             objreg_cs, scrreg_cs, scr_cs, pair_we, cco_cs, rw, int1,
-            blnk_sel, nc;
+            blnk_sel;
 wire [ 1:0] oram_we;
 wire [ 7:0] vtimer_mmr;
 wire [15:0] pal_dout, oram_dout;
 wire [15:0] video_dumpa;
-wire [13:1] oram_addr;
 reg  [ 7:0] debug_mux;
 // reg  [ 2:0] game_id;
 wire [15:0] tilesys_dout;
-wire [ 7:0] obj_dout, snd_latch, pair_dout,
-            st_main, st_video, st_snd;
-// wire [ 1:0] oram_we;
+wire [ 7:0] pair_dout, st_main, st_video, st_snd;
 wire [ 3:0] vtimer_addr;
 reg         moomesa, bucky;
 
 assign debug_view = debug_mux;
+// The board has no cabinet flip switch: the game flips the screen through the
+// K054156 global control register, and that state is reported back to JTFRAME
+assign dip_flip   = flip;
 // assign ram_we     = cpu_we & ram_cs;
 assign ram_addr   = main_addr[15:1];
 assign video_dumpa= ioctl_addr[15:0]-16'h80; // subtract NVRAM offset
@@ -68,7 +68,6 @@ jtmoo_main u_main(
     .cpu_we         ( cpu_we        ),
     .cpu_dout       ( ram_din       ),
     .vdtac          ( vdtac         ),
-    .tile_irqn      ( tile_irqn     ),
 
     .main_addr      ( main_addr     ),
     .rom_data       ( main_data     ),
@@ -97,7 +96,7 @@ jtmoo_main u_main(
     .oram_dout      ( oram_dout     ),
     .pal_dout       ( pal_dout      ),
     // To video
-    .rmrd           ( rmrd          ),
+    .rmrd_cs        ( rmrd_cs       ),
     .dma_bsy        ( dma_bsy       ),
     .objreg_cs      ( objreg_cs     ),
     .scrreg_cs      ( scrreg_cs     ),
@@ -105,12 +104,12 @@ jtmoo_main u_main(
     .blnk_sel       ( blnk_sel      ),
 
     .oram_we        ( oram_we       ),
-    .obj_cs         ( objsys_cs     ),
+    .oram_cs        ( objsys_cs     ),
     .scr_cs         ( scr_cs        ),
     .vram_cs        ( tilesys_cs    ),
     .pal_cs         ( pal_cs        ),
     .pcu_cs         ( pcu_cs        ), // priority mixer
-    .col_cs         ( col_cs        ), // K054338 registers
+    .k338_cs        ( k338_cs       ), // K054338 registers
     // To sound
     .sndon          ( snd_irq       ),
     .pair_we        ( pair_we       ),
@@ -129,9 +128,6 @@ jtmoo_main u_main(
     .debug_bus      ( debug_bus     )
 );
 
-// assign oram_we   = ~ram_dsn & {2{cpu_we}};
-assign oram_addr = {main_addr[6:5], main_addr[1], main_addr[13:7], main_addr[4:2]};
-
 /* verilator tracing_on */
 jtmoo_video u_video (
     .rst            ( rst           ),
@@ -140,14 +136,11 @@ jtmoo_video u_video (
     .pxl_cen        ( pxl_cen       ),
     .pxl2_cen       ( pxl2_cen      ),
 
-    .tile_irqn      ( tile_irqn     ),
-    .tile_nmin      (               ),
-
     .lhbl           ( LHBL          ),
     .lvbl           ( LVBL          ),
     .hs             ( HS            ),
     .vs             ( VS            ),
-    .flip           ( dip_flip      ),
+    .flip           ( flip          ),
     // GFX - CPU interface
     .cpu_we         ( cpu_we        ),
     .cpu_addr       (main_addr[16:1]),
@@ -156,7 +149,6 @@ jtmoo_video u_video (
 
     // Object DMA
     .oram_we        ( oram_we       ),
-    .oram_addr      ( oram_addr     ),
     .dma_bsy        ( dma_bsy       ),
 
     .objsys_cs      ( objsys_cs     ),
@@ -168,12 +160,12 @@ jtmoo_video u_video (
     .blnk_sel       ( blnk_sel      ),
     .pal_cs         ( pal_cs        ),
     .pcu_cs         ( pcu_cs        ),
-    .col_cs         ( col_cs        ),
+    .k338_cs        ( k338_cs       ),
     .vdtac          ( vdtac         ),
+    .rmrd_cs        ( rmrd_cs       ),
     .tilesys_dout   ( tilesys_dout  ),
     .objsys_dout    ( oram_dout     ),
     .pal_dout       ( pal_dout      ),
-    .rmrd           ( rmrd          ),
 
     .int1           ( int1          ),
     .cco_cs         ( cco_cs        ),
@@ -181,24 +173,26 @@ jtmoo_video u_video (
     .vtimer_mmr     ( vtimer_mmr    ),
     .vtimer_addr    ( vtimer_addr   ),
     // SDRAM
+    .lyrf_addr      ( lyrf_addr     ),
     .lyra_addr      ( lyra_addr     ),
     .lyrb_addr      ( lyrb_addr     ),
-    .lyrf_addr      ( lyrf_addr     ),
+    .lyrc_addr      ( lyrc_addr     ),
     .lyro_addr      ( lyro_addr     ),
+    .lyrf_data      ( lyrf_data     ),
     .lyra_data      ( lyra_data     ),
     .lyrb_data      ( lyrb_data     ),
+    .lyrc_data      ( lyrc_data     ),
     .lyro_data      ( lyro_data     ),
-    .lyrf_data      ( lyrf_data     ),
     .lyrf_cs        ( lyrf_cs       ),
     .lyra_cs        ( lyra_cs       ),
     .lyrb_cs        ( lyrb_cs       ),
+    .lyrc_cs        ( lyrc_cs       ),
     .lyro_cs        ( lyro_cs       ),
+    .lyrf_ok        ( lyrf_ok       ),
     .lyra_ok        ( lyra_ok       ),
+    .lyrb_ok        ( lyrb_ok       ),
+    .lyrc_ok        ( lyrc_ok       ),
     .lyro_ok        ( lyro_ok       ),
-    // brightness
-    .dim            (  3'b0         ),
-    .dimmod         (  1'b0         ),
-    .dimpol         (  1'b0         ),
     // pixels
     .red            ( red           ),
     .green          ( green         ),
@@ -213,13 +207,12 @@ jtmoo_video u_video (
 );
 
 /* verilator tracing_on */
-// jtrungun_sound now exposes a 17-bit ROM address; Moo's SDRAM port remains 18 bits.
-assign snd_addr[17] = 1'b0;
-
-jtrungun_sound #(.PRMR(1)) u_sound(
+jtmoo_sound u_sound(
     .rst            ( rst_snd       ),
     .clk            ( clk           ),
     .cen_8          ( cen_8         ),
+    .cen_4          ( cen_4         ),
+    .cen_2          ( cen_2         ),
     .cen_pcm        ( cen_pcm       ),
 
     // communication with main CPU
@@ -230,17 +223,14 @@ jtrungun_sound #(.PRMR(1)) u_sound(
 
     .snd_irq        ( snd_irq       ),
     // ROM
-    .rom_addr       ( snd_addr[16:0]), // Current jtrungun_sound ROM interface is 17 bits wide
+    .rom_addr       ( snd_addr      ),
     .rom_cs         ( snd_cs        ),
     .rom_data       ( snd_data      ),
     .rom_ok         ( snd_ok        ),
-    // ADPCM ROM
-    .pcma_addr      ( {nc,pcm_addr} ),
-    .pcmb_addr      (               ),
-    .pcma_data      ( pcm_data      ),
-    .pcmb_data      ( 8'd0          ),
-    .pcma_cs        ( pcm_cs        ),
-    .pcmb_cs        (               ),
+    // PCM ROM
+    .pcm_addr       ( pcm_addr      ),
+    .pcm_data       ( pcm_data      ),
+    .pcm_cs         ( pcm_cs        ),
     // Sound output
     .k539_l         ( k539_l        ),
     .k539_r         ( k539_r        ),
