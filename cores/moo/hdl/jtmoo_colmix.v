@@ -133,6 +133,30 @@ assign ci1       = 9'd0;
 // attribute's colpre[0] bit MAME's tile_callback discards), routed straight
 // through to the K053251's CI28 pin. On the board this is the per-tile
 // blend-enable flag for layer a -- see jt05415x.v tcolor[0]/a_pal[4].
+//
+// D4 (blnk_sel, KNOWN destination / RTL BLOCKED): a 2026-09-03(night)
+// re-trace of 053252.kicad_sch with two independent net-extraction tools
+// found the real gate chain for control-latch bit 9 (blnk_sel, latched in
+// jtmoo_main.v): N6.Q1 -> J8.1 XOR ~MCLK2 -> H6.4 AND FPAL4 -> SEL of L_B6
+// (74LS157), which selects between FCOL[3:0] (pass-through) and VSS
+// (forced 0) to produce FCOLR[3:0], landing on K053251 CI20-CI23 = ci2[3:0]
+// below (lyra_pxl[3:0]). KNOWN at schematic level, corroborated by both
+// tools -- this supersedes an earlier reading that treated H6.4 pin 11 as
+// an unconnected dead end (that was a stale per-sheet KiCad auto-label
+// collision, not a real dead end).
+// NOT implemented here: ~MCLK2 is a genuine board clock net (a toggling
+// square wave at the video dot-clock rate). This module has no equivalent
+// -- only `clk` (fast system clock) and `pxl_cen` (a single-cycle-per-pixel
+// STROBE, not a 50%-duty toggle) exist in this domain, and the true
+// MCLK2:pxl_cen frequency/phase ratio is not established from the capture
+// (see the B5 comment above, which flags the same open ratio for a
+// different latch). Reconstructing "blnk_sel XOR ~MCLK2" from pxl_cen would
+// mean guessing that ratio, which the evidence rules forbid inventing.
+// blnk_sel therefore stays routed only to unused_colmix below and ci2/
+// lyra_pxl are unchanged by it; the real gate's purpose is HYPOTHESIS
+// (possibly a per-half-dot-clock blank/dither effect) and unverified either
+// way. Closing this needs a direct MCLK2 pin trace or a directed hardware/
+// die-level capture establishing the MCLK2:pxl_cen ratio, not a guess here.
 assign ci2       = { lyra_pxl[8], lyra_pxl[7:4], lyra_pxl[3:0] };
 // CI3 (plane 2, board nets DSB0..DSB7): the low nibble (lyrb_pxl[3:0]) is
 // the ROM colour, wired directly (DSB0..3 = CCOL0..3 on the 054157 die,
@@ -482,6 +506,9 @@ jtframe_dual_ram #(.AW(8)) u_fpal_b(
 // B7: brit now feeds bri_l via mcol_bri (was unused).
 // B7: bri2_lvl/bri3_lvl are exposed on jt054338 but never selected (BRI1 is
 // tied on the board, see the pblend0 comment above) -- expected unused.
+// D4: blnk_sel still lands here, not on ci2 above -- its real gate needs a
+// ~MCLK2-equivalent toggle that does not exist in this module's clock
+// domain (see the ci2 comment). Still genuinely unused, not soaked wrongly.
 wire unused_colmix = &{ 1'b0, blnk_sel, lyrb_pxl[4], lyrf_l[11:8],
                         lyra_pxl[11:9], lyrb_pxl[11:8], lyrc_pxl[11:8],
                         bri2_lvl, bri3_lvl };
