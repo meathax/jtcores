@@ -15,7 +15,18 @@ clocks:
         - cen_pcm
 audio:
   gain: 1.99
+  # C5 (port): the real board sums the YM2151's serial output into the
+  # K054539's AUX pin internally (one physical output path, sound.kicad_sch
+  # chip E4) -- there is no real separate per-chip filter network to draw
+  # rsum/rc values from. `fm` is split out here only because the ported
+  # jt054539 module (from a hardware-validated third-party core, see
+  # jt054539.v's header) has no AUX input; rsum/rc for `fm` are a generic,
+  # unmeasured choice (jt51's own declared `rout`, matching the `k539`
+  # channel's rsum for balance since both channels' vpp is already handled
+  # by audio_mod.yaml), not derived from this board. Evidence class:
+  # HYPOTHESIS. See jtmoo_sound.v's jt054539 instantiation comment.
   channels:
+    - { name: fm,     module: jt51,     rsum: 1k, rc: [ { r: rout, c: 2.2n } ] }
     - { name: k539,   module: jt054539, rsum: 1k, rc: [ { r: 4.7k, c: 2.2n } ] }
 sdram:
   banks:

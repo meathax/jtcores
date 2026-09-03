@@ -53,7 +53,9 @@ jtframe:
       - jtframe_dual_nvram.v
       - jtframe_dual_nvram16.v
 jt51:
-jt539:
+jt054539:
+  - get:
+    - jt054539.v
 jteeprom:
   - get:
     - jt5911.sv

@@ -229,9 +229,13 @@ jtmoo_sound u_sound(
     .pcm_addr       ( pcm_addr      ),
     .pcm_data       ( pcm_data      ),
     .pcm_cs         ( pcm_cs        ),
+    .pcm_ok         ( pcm_ok        ), // C5 (port): was ungenerated-but-available on
+                                        // mem_ports.inc, never threaded through before
     // Sound output
     .k539_l         ( k539_l        ),
     .k539_r         ( k539_r        ),
+    .fm_l           ( fm_l          ), // C5 (port): FM's own mixer channel now that
+    .fm_r           ( fm_r          ), // it's no longer summed inside the K054539
     // Debug
     .debug_bus      ( debug_bus     ),
     .st_dout        ( st_snd        )

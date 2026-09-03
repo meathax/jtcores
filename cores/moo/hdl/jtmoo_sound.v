@@ -39,8 +39,18 @@ module jtmoo_sound(
     output  [21:0]  pcm_addr,
     input   [ 7:0]  pcm_data,
     output          pcm_cs,
-    // Sound output
+    input           pcm_ok,     // C5 (port): the K054539 must not read a sample byte
+                                 // before the SDRAM data is valid -- see jt054539.v.
+                                 // jtmoo_game_sdram.v already generates this signal
+                                 // from cfg/mem.yaml's `pcm` bus; it just wasn't
+                                 // threaded through this module until now.
+    // Sound output. k539_l/r: K054321-attenuated K054539 PCM (unchanged name/
+    // wiring). fm_l/r: YM2151 FM, now its OWN mixer channel (C5 FM-routing
+    // decision, see the jt054539 instantiation below for why) instead of
+    // being summed into the K054539's AUX input as the real board schematic
+    // shows -- deliberate accuracy/practicality tradeoff, documented there.
     output     signed [15:0] k539_l, k539_r,
+    output     signed [15:0] fm_l, fm_r,
     // Debug
     input    [ 7:0] debug_bus,
     output   [ 7:0] st_dout
@@ -54,10 +64,20 @@ wire [15:0] A;
 wire        m1_n, mreq_n, rd_n, wr_n, iorq_n, rfsh_n, nmi_n,
             cpu_cen, fm_intn, latch_we, int_n;
 reg         ram_cs, fm_cs, k39_cs, k21_cs, bank_we, mem_acc, nmi_clr;
-wire signed [15:0] fm_l, fm_r;
 // K054539 output before the K054321's global volume stage
 wire signed [15:0] pcm_l, pcm_r;
-wire [ 1:0] nc;         // C8: pcm_addr is now 22 bits, rom_addr is 24
+wire [ 1:0] nc;         // C8: pcm_addr is now 22 bits, rom_addr is 24. Harmless
+                        // padding: jt054539's internal rom_addr accumulator
+                        // never needs bits [23:22] for a real 2MB (Moo Mesa)
+                        // or 4MB (Bucky, hypothetically) sample set, and only
+                        // pcm_addr[21:0] reaches the physical SDRAM bus.
+                        // C5 (port): the ported module has NO ROBS-equivalent
+                        // second-ROM-bank select at all -- Bucky O'Hare's
+                        // second sample ROM (A6, selected by the real
+                        // K054539's ROBS pin) is NOT supported by this port.
+                        // Moo Mesa itself only ever populates 2MB (B6) and is
+                        // unaffected. Left undriven rather than inventing
+                        // bank-select logic with no evidence for its timing.
 
 // 054744 (PAL16L8) pin 12, SND~PAL8 -> J2 a39/b39 -> U2.24 on the 054986A
 // daughterboard. Transcribed from the fusemap in doc/054744:
@@ -165,7 +185,11 @@ jt51 u_jt51(
     .irq_n      ( fm_intn   ),
     // The board feeds the K054539's AUX1 input from the YM2151's serial DAC
     // output (SO, pin 21 -> AXDA), which is the quantised low-resolution
-    // stream, not the internal full-resolution accumulator. C10.
+    // stream, not the internal full-resolution accumulator. C10. C5 (port):
+    // jt054539.v has no AUX input (see the FM-routing note below), so this
+    // low-resolution `left`/`right` output now feeds its own mixer channel
+    // (`fm_l`/`fm_r`, module output) instead of the K054539 -- still the
+    // low-resolution pair called for by C10, just summed a stage later.
     .sample     (           ),
     .left       ( fm_l      ),
     .right      ( fm_r      ),
@@ -175,7 +199,29 @@ jt51 u_jt51(
 );
 
 /* verilator tracing_on */
-jt539 #(.VOLSHIFT(1)) u_k54539(
+// C5 (port): jt054539.v is a from-scratch, real-hardware-validated K054539
+// implementation adapted from github.com/jlrh/konami-fpga (GPL-3.0, same
+// game/board family) -- see modules/jt054539/hdl/jt054539.v for full
+// provenance and D:\evidence\moo\log_pcmport.md for the import record.
+// It replaces the modules/jt539 stub (that submodule's upstream, Jotego's
+// private jt539, was never reachable -- see log_pcm.md "C5"; Furrtek's raw
+// SiliconRE netlist was independently judged unportable in one session,
+// same log).
+//
+// FM-routing deviation from the schematic (documented, not silent): the
+// real board feeds the YM2151's serial output into the K054539's AUX1 pin,
+// which mixes FM+PCM inside the chip before its own L/R pins (tier-1
+// schematic evidence, sound.kicad_sch chip E4). The ported module has no
+// AUX input at all -- its upstream author removed it after finding that
+// summing FM+PCM inside the chip's Q16 accumulator railed the final clip16
+// during their own hardware bring-up. This project follows their
+// hardware-validated choice (FM and PCM as separate jtframe rcmix channels,
+// summed at wide precision downstream instead of inside the chip) rather
+// than re-adding an aux-mixing path this project has not itself validated.
+// Evidence class: KNOWN (schematic wiring) vs INFERRED (that the separate-
+// channel approach is audibly equivalent) -- a real accuracy/practicality
+// tradeoff, not an oversight.
+jt054539 #(.VOLSHIFT(1)) u_k054539(
     .rst        ( rst       ),
     .clk        ( clk       ),
     .cen        ( cen_pcm   ),
@@ -191,9 +237,7 @@ jt539 #(.VOLSHIFT(1)) u_k54539(
     .rom_cs     ( pcm_cs    ),
     .rom_addr   ({nc,pcm_addr}),
     .rom_data   ( pcm_data  ),
-    // YM2151 serial output mixed in by the K054539 (AUX1 on the schematics)
-    .aux_l      ( fm_l      ),
-    .aux_r      ( fm_r      ),
+    .rom_ok     ( pcm_ok    ),
     // Sound output, before the K054321 volume stage
     .left       ( pcm_l     ),
     .right      ( pcm_r     ),
@@ -237,6 +281,6 @@ assign  rom_addr = 0;
 assign  pcm_addr = 0;
 assign  pcm_cs   = 0;
 assign  st_dout  = 0;
-assign  { pair_dout, k539_l, k539_r } = 0;
+assign  { pair_dout, k539_l, k539_r, fm_l, fm_r } = 0;
 `endif
 endmodule
