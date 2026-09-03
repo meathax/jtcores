@@ -51,7 +51,7 @@ wire [ 3:0] rom_hi;
 reg  [ 3:0] bank;
 wire [15:0] A;
 wire        m1_n, mreq_n, rd_n, wr_n, iorq_n, rfsh_n, nmi_n,
-            cpu_cen, cen_g, fm_intn, latch_we, int_n;
+            cpu_cen, fm_intn, latch_we, int_n;
 reg         ram_cs, fm_cs, k39_cs, k21_cs, bank_we, mem_acc, nmi_clr;
 wire signed [15:0] fm_l, fm_r;
 wire [ 2:0] nc;
@@ -65,18 +65,11 @@ assign cpu_din  = rom_cs ? rom_data   :
                   k39_cs ? k39_dout   :
                   k21_cs ? latch_dout :
                   fm_cs  ? fm_dout    : 8'hff;
-// wait state for ROM (SDRAM) access only -- the board's Z80 runs at a
-// constant 8 MHz with no wait states (C14 ~WAIT tied to VCC on the
-// schematic, confirmed by MAME's "32MHz/4, 8MHz verified" comment); work
-// RAM is on-chip BRAM with no latency to hide. Previously halving the
-// clock on every RAM access too. See sound_pcm.md GAP-9.
-assign cen_g    = rom_cs ? cen_4 : cen_8;
+// board has no Z80 wait states (C14 ~WAIT tied VCC); jtframe_sysz80 already
+// handles rom_ok stalling internally
 
-// 054744 (PAL16L8) at E7. Fusemap decoded from D:\evidence\moo\pld\054744\
-// Konami_054744.jed (D:\evidence\moo\jed2.py) -- A10 does not appear in the
-// /PCM, /FM or /SLATCHES product terms, so each real window is twice the
-// width this used to decode (mirrors at the A10=1 half). See
-// D:\evidence\moo\audit\sch\sound_pcm.md GAP-4.
+// 054744 (PAL16L8) at E7, decoded from its fusemap (see doc/054744):
+// A10 is absent from the /PCM, /FM and /SLATCHES terms, so each window is 2 kB
 always @(*) begin
     mem_acc = !mreq_n && rfsh_n;
     rom_cs  = mem_acc && !(A[15] && A[14]) && !rd_n; // /SROM     0000-BFFF
@@ -87,12 +80,7 @@ always @(*) begin
     bank_we = mem_acc && A[15:10]==6'b1111_10;       // /SBANK_WR F800-FBFF
 end
 
-// D7 (74LS174) bank/NMI latch. The PAL's /SBANK_WR term (JED-decoded) has
-// no /WR or /RD in it -- D7 clocks on the trailing edge of the F800-FBFF
-// decode itself, on any access, not gated by write. Sample cpu_dout at
-// that trailing edge; harmless in practice since MAME/the firmware only
-// ever write there, but this matches the schematic instead of latching on
-// every clock throughout a write. See sound_pcm.md GAP-3.
+// D7 (74LS174): clocks on any F800-FBFF access, not gated by write.
 reg bank_we_l;
 always @(posedge clk) if(cpu_cen) bank_we_l <= bank_we;
 wire bank_we_fall = bank_we_l & ~bank_we;
@@ -100,25 +88,15 @@ wire bank_we_fall = bank_we_l & ~bank_we;
 always @(posedge clk, posedge rst) begin
     if( rst ) begin
         bank    <= 0;
-        // S~RST clears D7's Q4 to 0 (74LS174 ~MR), holding the NMI
-        // flip-flop's active-low async SET low -> NMI masked out of reset.
-        nmi_clr <= 1;
+        nmi_clr <= 1; // D7 Q4 cleared on reset -> NMI held masked
     end else if( bank_we_fall ) begin
         bank    <= cpu_dout[3:0];
-        // ~{NMI_CLR} = Q4 wired straight to the 74LS74's active-low async
-        // SET (no inverter on the net): bit4=0 -> NMI held masked,
-        // bit4=1 -> NMI enabled. clr here is active-high "hold masked",
-        // so clr = ~bit4. See sound_pcm.md GAP-2.
-        nmi_clr <= ~cpu_dout[4];
+        nmi_clr <= ~cpu_dout[4]; // Q4 -> 74LS74 active-low async SET
     end
 end
 
-// G6B (74LS74) clocked by the inverted YM2151 IRQ (G6.5 inverter on the
-// schematic): the flip-flop latches on the *assertion* edge of the
-// YM2151's active-low IRQ, not its release -- edgeof must therefore be
-// ~fm_intn so jtframe_edge's rising-edge trigger fires when fm_intn falls.
-// MAME does not model this path at all, so a MAME differential cannot
-// falsify either polarity bug (sound_pcm.md GAP-1).
+// G6B (74LS74) latches on the YM2151 IRQ's assertion edge (G6.5 inverter
+// on the schematic). MAME does not model this path.
 jtframe_edge #(.QSET(0)) u_edge (
     .rst    ( rst       ),
     .clk    ( clk       ),
@@ -131,7 +109,7 @@ jtframe_edge #(.QSET(0)) u_edge (
 jtframe_sysz80 #(`ifdef SND_RAMW .RAM_AW(`SND_RAMW), `endif .CLR_INT(1)) u_cpu(
     .rst_n      ( ~rst      ),
     .clk        ( clk       ),
-    .cen        ( cen_g     ),
+    .cen        ( cen_8     ),
     .cpu_cen    ( cpu_cen   ),
     .int_n      ( int_n     ),
     .nmi_n      ( nmi_n     ),

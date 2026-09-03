@@ -64,9 +64,11 @@ wire [15:0] k338_dout;
 reg  [23:0] bgr;
 reg  [ 7:0] r8, g8, b8;
 wire [10:0] col;
-wire        pcu_we, reg_we, col_n, k338_video_en;
+wire        pcu_we, reg_we, col_n, k338_video_en, clipsl;
 wire signed [9:0] shad_r, shad_g, shad_b;
 wire [23:0] k338_bg;
+wire [ 7:0] alpha_level;
+wire        alpha_add, pblend0;
 // K053251 inputs
 wire [ 5:0] pri0;
 wire [ 8:0] ci0, ci1, ci2;
@@ -77,13 +79,21 @@ wire        brit;
 wire [10:0] pal_addr, cpu_pal_addr;
 wire [ 7:0] pal_r, pal_g, pal_b, cpu_r, cpu_g, cpu_b;
 wire        wr_r, wr_g, wr_b, pal_word;
-// plane 0 bypass
+// plane 0 (layer F) bypass + its own blend-only palette lookup. The real
+// 054338 (J3) owns RAB0-12 to G4/H4/J4 and reads the palette bank twice per
+// pixel (SiliconRE: "alternating pixel color codes for the two layers");
+// here that is modelled as a second, independent 256-entry mirror of the
+// fixed 0x700-0x7FF plane-0 bank instead of doubling the shared port's
+// read rate, so the existing mcol/pal_addr timing is untouched.
 wire        p0_opaque;
-wire [10:0] mcol;
 wire        mcol_blank;
 wire [ 1:0] mcol_shd;
 reg  [ 1:0] shd_l;
 reg         blank_l;
+reg         fixop_a, blend_a;
+wire        f_wr_r, f_wr_g, f_wr_b;
+wire [ 7:0] f_pal_r, f_pal_g, f_pal_b;
+reg  [ 7:0] fr8, fg8, fb8;
 
 // The K054338 sees the palette as xRGB_888, big endian: the even word holds
 // the red byte in D[7:0], the odd word holds green in D[15:8] and blue in
@@ -103,27 +113,73 @@ assign {blue,green,red} = (lvbl & lhbl) ? bgr : 24'd0;
 assign pri0      = { lyro_pri, 1'b1 };
 assign ci0       = lyro_pxl;
 assign ci1       = 9'd0;
-// CI2 is nine bits wide. With four palette bits per layer FPAL4 is always
-// low, so the N6/H6 gate that would blank FCOLR under blnk_sel never fires
-assign ci2       = { 1'b0, lyra_pxl[7:4], lyra_pxl[3:0] };
+// CI2 bit 8 is FPAL4 on the schematic: the K054157's DFI8 output (the tile
+// attribute's colpre[0] bit MAME's tile_callback discards), routed straight
+// through to the K053251's CI28 pin. On the board this is the per-tile
+// blend-enable flag for layer a -- see jt05415x.v tcolor[0]/a_pal[4].
+assign ci2       = { lyra_pxl[8], lyra_pxl[7:4], lyra_pxl[3:0] };
 assign ci3       = { 1'b0, lyrb_pxl[6:4], lyrb_pxl[3:0] }; // only CI30..CI36 wired
 assign ci4       = { lyrc_pxl[7:4], lyrc_pxl[3:0] };
 assign shd_in    = shadow;
 
-// Plane 0 wins over everything when it is opaque and brings its own
-// palette bank, with no shadow, blank or blend qualifier
+// MIX0 on the board is COL8 & ~COL9 & ~COL10 sampled on the K053251's own
+// output slot (H8/H9 mux I0 = M9), never on plane 0's slot -- see EVIDENCE.md.
+assign pblend0    = col[8] & ~col[9] & ~col[10];
+// Plane 0 (layer F) is the board's other alternating slot (H8/H9 mux I1 =
+// L7, the K054157 CO bus): when opaque and pblend0 is clear it still wins
+// outright with its own fixed palette bank, unchanged from before. When
+// pblend0 is set the K054338 blends it with the K053251 winner instead of
+// overriding it -- see the fr8/fg8/fb8 mirror lookup and the bgr mux below.
 assign p0_opaque  = |lyrf_pxl[3:0];
-assign mcol       = p0_opaque ? { 3'b111, lyrf_pxl[7:0] } : col;
 assign mcol_blank = p0_opaque ? 1'b0 : col_n;
 assign mcol_shd   = p0_opaque ? 2'b0 : shd_out;
-assign pal_addr   = mcol;
+assign pal_addr   = col;
 
-function [7:0] add_clip(input [7:0] cin, input signed [9:0] delta);
+// Plane 0's own 256-entry bank (0x700-0x7FF), mirrored from the CPU's
+// writes to the main palette RAM so it can be read in parallel with the
+// K053251 winner instead of stealing the shared video port.
+assign f_wr_r = wr_r & (cpu_pal_addr[10:8]==3'b111);
+assign f_wr_g = wr_g & (cpu_pal_addr[10:8]==3'b111);
+assign f_wr_b = wr_b & (cpu_pal_addr[10:8]==3'b111);
+
+function [7:0] add_clip(input [7:0] cin, input signed [9:0] delta, input noclip);
     reg signed [10:0] sum;
 begin
     sum = {3'd0,cin} + delta;
-    add_clip = sum < 0        ? 8'd0  :
-               sum > 11'sd255 ? 8'hff : sum[7:0];
+    // CONTROL[5] (CLIPSL) disables the min/max clamp on real silicon
+    // (Konami 054338, SiliconRE gate-level trace) -- the sum wraps instead
+    // of saturating when set.
+    add_clip = noclip          ? sum[7:0] :
+               sum < 0         ? 8'd0  :
+               sum > 11'sd255  ? 8'hff : sum[7:0];
+end
+endfunction
+
+// K054338 mode 0 (interpolation, front*level + back*(256-level), top 8 of
+// the sum) and mode 1 (additive, front + back*(32-mixlv)>>5) -- SiliconRE
+// Konami/054338 README. mixlv (5b) is recovered from alpha_level (8b) as
+// its top 5 bits: jt054338 expands mixlv to alpha_level={mixlv,mixlv[4:2]}.
+// Only mode 0 is exercised by this ROM (see EVIDENCE.md register trace);
+// mode 1 is implemented from the same evidence but unverified in practice.
+function [7:0] mix_blend(input [7:0] front, input [7:0] back, input [7:0] level, input additive);
+    reg [ 8:0] inv9;
+    reg [ 5:0] inv5;
+    reg [17:0] sum;
+    reg [13:0] aprod;
+    reg [ 8:0] asum;
+begin
+    inv9 = 9'd256 - {1'b0,level};
+    if( additive ) begin
+        inv5  = 6'd32 - {1'b0,level[7:3]};
+        aprod = back * inv5;
+        asum  = {1'b0,front} + aprod[13:5];
+        mix_blend = asum[8] ? 8'hff : asum[7:0];
+    end else begin
+        // front,back<=255 and level+inv9==256 exactly, so this sum is
+        // provably <=255*256=65280 and the >>8 below never needs a clamp.
+        sum = front*level + back*inv9;
+        mix_blend = sum[15:8];
+    end
 end
 endfunction
 
@@ -132,16 +188,26 @@ always @(posedge clk, posedge rst) begin
         bgr     <= 0;
         shd_l   <= 0;
         blank_l <= 0;
-        {r8,g8,b8} <= 0;
+        fixop_a <= 0;
+        blend_a <= 0;
+        {r8,g8,b8}    <= 0;
+        {fr8,fg8,fb8} <= 0;
     end else begin
-        { r8, g8, b8 } <= { pal_r, pal_g, pal_b };
+        { r8,  g8,  b8  } <= { pal_r,   pal_g,   pal_b   };
+        { fr8, fg8, fb8 } <= { f_pal_r, f_pal_g, f_pal_b };
         if( pxl_cen ) begin
             shd_l   <= mcol_shd;
             blank_l <= mcol_blank;
-            bgr     <= !k338_video_en ? 24'd0 :
-                       blank_l        ? k338_bg :
-                       ~|shd_l        ? { b8, g8, r8 } :
-                                        { add_clip(b8,shad_b), add_clip(g8,shad_g), add_clip(r8,shad_r) };
+            fixop_a <= p0_opaque;
+            blend_a <= p0_opaque & pblend0;
+            bgr     <= !k338_video_en   ? 24'd0 :
+                       blank_l          ? k338_bg :
+                       fixop_a & ~blend_a ? { fb8, fg8, fr8 } :
+                       fixop_a &  blend_a ? { mix_blend(fb8,b8,alpha_level,alpha_add),
+                                               mix_blend(fg8,g8,alpha_level,alpha_add),
+                                               mix_blend(fr8,r8,alpha_level,alpha_add) } :
+                       ~|shd_l          ? { b8, g8, r8 } :
+                                          { add_clip(b8,shad_b,clipsl), add_clip(g8,shad_g,clipsl), add_clip(r8,shad_r,clipsl) };
         end
     end
 end
@@ -167,18 +233,22 @@ jt054338 u_k338(
     .dsn         ( cpu_dsn         ),
     .dout        ( k338_dout       ),
 
-    // MIX0 on the board is COL8 & ~COL9 & ~COL10 out of the K053251
-    .pblend      ( { 1'b0, mcol[8] & ~mcol[9] & ~mcol[10] } ),
+    .pblend      ( { 1'b0, pblend0 } ),
     .shadow      ( shd_l           ),
 
     .bg_rgb      ( k338_bg         ),
-    .alpha_level (                 ),
-    .alpha_add   (                 ),
+    .alpha_level ( alpha_level     ),
+    .alpha_add   ( alpha_add       ),
     .video_en    ( k338_video_en   ),
+    // mixpri/shdpri/brtpri: on real silicon (Konami 054338, SiliconRE
+    // gate-level trace) these select pipeline delay for the external
+    // MIX/SHD/BRI pin busses, compensating for board wire skew between the
+    // 053251 and this chip. A synchronous FPGA model has no such skew to
+    // compensate for, so they are left open.
     .mixpri      (                 ),
     .shdpri      (                 ),
     .brtpri      (                 ),
-    .clipsl      (                 ),
+    .clipsl      ( clipsl          ),
     .dump_mmr    (                 ),
 
     .shadow_r    ( shad_r          ),
@@ -259,9 +329,52 @@ jtframe_dual_ram #(.AW(11),.SIMFILE("pal_b.bin")) u_pal_b(
     .q1     ( pal_b         )
 );
 
+// Plane 0's own 256-entry mirror (0x700-0x7FF), read at lyrf_pxl[7:0] in
+// parallel with the K053251 winner above -- see the f_wr_r/g/b comment and
+// the bgr mux. No SIMFILE: it is populated by the same CPU writes as the
+// main palette RAM well before any blend is exercised.
+jtframe_dual_ram #(.AW(8)) u_fpal_g(
+    .clk0   ( clk               ),
+    .data0  ( cpu_dout[15:8]    ),
+    .addr0  ( cpu_pal_addr[7:0] ),
+    .we0    ( f_wr_g            ),
+    .q0     (                   ),
+    .clk1   ( clk               ),
+    .data1  ( 8'd0              ),
+    .addr1  ( lyrf_pxl[7:0]     ),
+    .we1    ( 1'b0              ),
+    .q1     ( f_pal_g           )
+);
+
+jtframe_dual_ram #(.AW(8)) u_fpal_r(
+    .clk0   ( clk               ),
+    .data0  ( cpu_dout[7:0]     ),
+    .addr0  ( cpu_pal_addr[7:0] ),
+    .we0    ( f_wr_r            ),
+    .q0     (                   ),
+    .clk1   ( clk               ),
+    .data1  ( 8'd0              ),
+    .addr1  ( lyrf_pxl[7:0]     ),
+    .we1    ( 1'b0              ),
+    .q1     ( f_pal_r           )
+);
+
+jtframe_dual_ram #(.AW(8)) u_fpal_b(
+    .clk0   ( clk               ),
+    .data0  ( cpu_dout[7:0]     ),
+    .addr0  ( cpu_pal_addr[7:0] ),
+    .we0    ( f_wr_b            ),
+    .q0     (                   ),
+    .clk1   ( clk               ),
+    .data1  ( 8'd0              ),
+    .addr1  ( lyrf_pxl[7:0]     ),
+    .we1    ( 1'b0              ),
+    .q1     ( f_pal_b           )
+);
+
 `ifdef SIMULATION
 wire unused_colmix = &{ 1'b0, brit, blnk_sel, lyrb_pxl[7], lyrf_pxl[11:8],
-                        lyra_pxl[11:8], lyrb_pxl[11:8], lyrc_pxl[11:8] };
+                        lyra_pxl[11:9], lyrb_pxl[11:8], lyrc_pxl[11:8] };
 `endif
 
 endmodule

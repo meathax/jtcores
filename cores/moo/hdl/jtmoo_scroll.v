@@ -7,9 +7,7 @@
 // Layer naming follows the K054156 registers. Layer F (the fourth pixel
 // pipeline, the CO bus) bypasses the K053251 entirely on this board;
 // layers A, B and C feed the K053251 inputs CI2, CI3 and CI4 respectively.
-// See D:\evidence\moo\audit\sch\scroll.md and colmix_rgb.md -- a prior
-// version of this comment named "layer A" as the bypass, which is wrong:
-// on the die, layer A's ACOL/APAL (DSB*) is MAME's plane 2, feeding CI3.
+// Layer A (ACOL/APAL) is MAME's plane 2 and feeds CI3.
 
 module jtmoo_scroll(
     input             rst,

@@ -1,5 +1,5 @@
 CORENAME=JTMOO
-JTFRAME_SKIP
+JTFRAME_RATE=59.19
 
 JTFRAME_HEADER=16
 JTFRAME_BUTTONS=3
@@ -24,3 +24,7 @@ SND_RAMW=13
 # default EEPROM needed to prevent game from booting upside down with error
 JTFRAME_IOCTL_RD=128
 debug JTFRAME_IOCTL_RD+=36897
+
+[mist|sidi]
+# not enough BRAM
+JTFRAME_SKIP

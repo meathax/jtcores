@@ -28,7 +28,6 @@
 // is *not* L10 -- matters only for matching an ioctl RAM dump or a MAME
 // k056832 videoram dump byte-for-byte against a specific physical chip;
 // functionally irrelevant since all three are private to this module.
-// See D:\evidence\moo\audit\sch\scroll.md GAP-6.
 //
 // Scan cadence: every 8-pixel group has eight slots. The first four fetch one
 // tile per layer, the last four refresh each layer's line/row scroll word.
@@ -481,7 +480,13 @@ always @(posedge clk) begin
                 f_hf  <=tflip[0]; f_vf<=tflip[1]; f_en<=active_nx;
             end
             2'd1: begin
-                a_code<={vram1_scan,vram2_scan}; a_pal<={4'd0,tcolor[5:2]};
+                a_code<={vram1_scan,vram2_scan};
+                // tcolor[1:0] are the two bits MAME's tile_callback discards
+                // from colpre (moo.cpp:290). Only tcolor[0] is wired on the
+                // board: FPAL4 (K054157 DFI8, layer a only) carries it to
+                // the K053251's CI28 pin, landing in a_pal[4] -> lyra_pxl[8]
+                // -> ci2[8] in jtmoo_colmix -- the 054338 blend-enable flag.
+                a_pal <={3'd0,tcolor[0],tcolor[5:2]};
                 a_hf  <=tflip[0]; a_vf<=tflip[1]; a_en<=active_nx;
             end
             2'd2: begin

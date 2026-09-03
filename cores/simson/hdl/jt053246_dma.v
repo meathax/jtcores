@@ -39,12 +39,9 @@ parameter K55673=0, K55673_DESC_SORT=0, EDGE_TRIGGER=0;
 // with A6/A7 not connected to the RAM at all (aliased). ESTRIDE_LOG2 is
 // log2(external words per entry); ENTRY_LOG2 is log2(max entries), used
 // only to size the non-k44 termination check. Changing these two together
-// changes what `dma_addr` (the address exposed to the external RAM) means;
-// `dma_wr_addr` (the internal priority-sort LUT) is unaffected -- it stays
-// 2048 slots regardless, per the plan's explicit instruction to leave it
-// alone. The k44_en=1 path (053244/5, cores/riders + cores/prmr via
-// jt053244.sv) always uses the default values below and is untouched by
-// this parameterisation. See D:\evidence\moo\audit\sch\objects.md GAP-3.
+// changes what dma_addr (the address exposed to the external RAM) means.
+// dma_wr_addr (the internal priority-sort LUT) stays at 2048 slots. The
+// k44_en=1 path (053244/5) keeps the default values below.
 parameter ESTRIDE_LOG2 = 3, ENTRY_LOG2 = 9;
 localparam GAPBITS   = ESTRIDE_LOG2>3 ? ESTRIDE_LOG2-3 : 0;
 localparam ENTRY_TOP = 3+ENTRY_LOG2; // top bit of the entry field inside cnt

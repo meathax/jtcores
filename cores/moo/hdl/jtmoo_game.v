@@ -8,8 +8,7 @@ module jtmoo_game(
     `include "jtframe_game_ports.inc" // see $JTFRAME/hdl/inc/jtframe_game_ports.inc
 );
 
-localparam MOOMESA = 0,
-           BUCKY   = 1;
+localparam BUCKY = 1;
 
 /* verilator tracing_off */
 wire        snd_irq, rmrd_cs, rst8, rst_snd, dma_bsy,
@@ -26,13 +25,12 @@ reg  [ 7:0] debug_mux;
 wire [15:0] tilesys_dout;
 wire [ 7:0] pair_dout, st_main, st_video, st_snd;
 wire [ 3:0] vtimer_addr;
-reg         moomesa, bucky;
+reg         bucky;
 
 assign debug_view = debug_mux;
 // The board has no cabinet flip switch: the game flips the screen through the
 // K054156 global control register, and that state is reported back to JTFRAME
 assign dip_flip   = flip;
-// assign ram_we     = cpu_we & ram_cs;
 assign ram_addr   = main_addr[15:1];
 assign video_dumpa= ioctl_addr[15:0]-16'h80; // subtract NVRAM offset
 assign vtimer_addr= main_addr[4:1];
@@ -51,7 +49,6 @@ end
 
 always @(posedge clk) begin
     if( prog_addr[3:0]==15 && prog_we && header ) begin
-        moomesa <= prog_data[MOOMESA];
         bucky   <= prog_data[BUCKY];
     end
 end

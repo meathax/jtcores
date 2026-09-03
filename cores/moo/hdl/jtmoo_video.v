@@ -126,26 +126,9 @@ jtriders_dump #(.FULLRAM(1)) u_dump(
     .st_dout        ( st_dout         )
 );
 
-// video timer, L4 on the schematics
-// INIT overrides jtk053252's own default (tuned for rungun's byte values).
-// Bytes 0..13 = 01 FF 00 21 00 37 00 00 01 07 11 0E 74 00 (bytes 14/15 are
-// the int1ack/int2ack write-only strobe addresses, not stored state, left
-// at 0). Read LIVE from a running `moomesa` MAME session on 2026-09-03
-// (mem:read_u8 on 0x0D0000-0x0D001F, the real 053252 CCU map per
-// doc/moo.cpp moo_prot_state::main_map), stable across 420 frames (7 s)
-// of boot -- HC=0x1FF->512, HFP=0x21->33, HBP=0x37->55, VC=0x107->264,
-// VFP=0x11->17, VBP=0x0E->15, VSW=7+1=8, HSW=4+1=5. This supersedes the
-// earlier guess (bytes 3/5/6 = 19/1F/04) that came from MAME's k053252.cpp
-// comment table row grouping moo with rungun/dj main -- that row does NOT
-// hold for HFP/HBP/nhbs_dly on this title; VC/VFP/VBP/VSW/HSW did already
-// match exactly. Tier-2 evidence (observed on this actual title via
-// accurate emulation) superseding the earlier tier-3 shared-table guess.
-// Without a correct INIT the module free-runs on its own rungun-shaped
-// default, produces one spurious LVBL edge near reset and then never
-// cycles again -- with nothing downstream (object DMA, hence IRQ5) ever
-// triggered, the boot ROM's earliest EEPROM-wait loop (TST.L $18004A/BNE)
-// never resolves and the core never reaches attract mode. See
-// D:\evidence\moo\log.md, 2026-09-02/03.
+// video timer, L4 on the schematics. INIT holds the values the game programs
+// at 0D0000-0D001F: HC=512 HFP=33 HBP=55 VC=264 VFP=17 VBP=15 VSW=8 HSW=5.
+// Without it the CCU never cycles and the boot ROM hangs before attract.
 jtk053252 #(.INIT(128'h00_00_00_74_0E_11_07_01_00_00_37_00_21_00_FF_01)) u_k053252(
     .rst        ( rst           ),
     .clk        ( clk           ),
@@ -240,11 +223,9 @@ assign ommra = {cpu_addr[3:1],cpu_dsn[1]};
 // Object RAM word address: F6/F7 (74LS245) on the schematic give
 // {EN7..EN0,EA5..EA1} = {MAIN_A15..A8, MAIN_A5..A1}; A6/A7 are not wired to
 // the RAM at all (each entry's 32 words alias four times across them).
-// Entry stride is therefore 32 words, not the flat 13-bit index this used
-// to be. See D:\evidence\moo\audit\sch\objects.md GAP-2. The DMA-side read
-// address (jtsimson_obj's .ESTRIDE_LOG2(5)/.ENTRY_LOG2(8) below, feeding
-// cores/simson/hdl/jt053246_dma.v) now uses the same 32-word/256-entry
-// geometry (GAP-3), so the CPU-write and DMA-read views of this RAM agree.
+// Entry stride is therefore 32 words. The DMA-side read address
+// (ESTRIDE_LOG2(5)/ENTRY_LOG2(8) below) uses the same geometry, so the
+// CPU-write and DMA-read views of this RAM agree.
 assign orama = {cpu_addr[15:8], cpu_addr[5:1]};
 
 localparam [9:0] OVOFFSET=0;

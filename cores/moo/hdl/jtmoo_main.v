@@ -92,18 +92,8 @@ wire        asn_mx;
 wire [ 1:0] dsn_mx;
 
 /* verilator tracing_on */
-// Bus-master mux: the 053990 (jtriders_tmnt2) can take real bus mastership
-// for its DMA block-copy (BRn/BGACKn wired to the CPU's own arbitration
-// pins below). While it holds the bus (prot_bgackn low) the address, byte
-// strobes, write-data and write-enable the memory subsystem sees must come
-// from the 053990's own bus_addr/bus_dsn/bus_din/bus_wrn, not the 68000's
-// (which is not actually driving the bus during that window). Pattern
-// follows cores/riders/hdl/jtriders_main.v (a_mx/asn_mx/tmnt_dout/bus_din).
-// Evidence: main.kicad_sch shows BRn/BGACKn wired straight to N4 (053990);
-// prot_addr/prot_asn/prot_dsn were previously declared but never used here
-// (schematic audit GAP-3, D:\evidence\moo\audit\sch\main.md). 053990 bus
-// timing itself is not fully reverse-engineered (SiliconRE WIP) so this
-// mux is a structural fix only -- HYPOTHESIS on exact cycle timing.
+// 053990 (N4) takes the bus for its DMA (BRn/BGACKn on main.kicad_sch),
+// same pattern as jtriders_main. Exact 053990 cycle timing unverified.
 assign a_mx     = prot_bgackn ? A            : prot_addr;
 assign asn_mx   = prot_bgackn ? ASn          : prot_asn;
 assign dsn_mx   = prot_bgackn ? {UDSn, LDSn} : prot_dsn;
@@ -112,6 +102,9 @@ assign rw       = prot_bgackn ? RnW          : prot_wrn;
 assign main_addr= a_mx[20:1];
 assign ram_dsn  = dsn_mx;
 assign ram_we   = ram_cs & ~rw & ~&ram_dsn;
+// rmrd_cs/vdtac is folded into bus_busy so the dtack recovery accounting
+// sees it (cal50 does the same; riders/xmen instead OR ~vdtac onto DTACKn
+// outside the recovery math -- either works, this just states the choice).
 assign bus_cs   = rom_cs | ram_cs | rmrd_cs;
 assign bus_busy = (rom_cs & ~rom_ok) | (ram_cs & ~ram_ok) | (rmrd_cs & ~vdtac);
 assign BUSn     = asn_mx | (dsn_mx[1] & dsn_mx[0]);
@@ -119,10 +112,7 @@ assign VPAn     = ~vpa;
 
 assign cpu_we   = prot_bgackn ? ~RnW : ~prot_wrn;
 assign cpu_dout = prot_bgackn ? cpu_dout_68k : prot_din;
-// oram_we/oram_cs: 0x190000-0x19FFFF sprite RAM window (055373 ORAMWE term).
-// Board strobes ORAM~WEL/WEH assert only on a write cycle (R/W low); rw
-// follows the 68000 RnW convention (1=read), so the write gate is ~rw, not
-// rw as before. See D:\evidence\moo\audit\sch\main.md GAP-1/objects.md GAP-4.
+// 0x190000-0x19FFFF sprite RAM, 055373 ORAMWE term: write cycles only
 assign oram_we  = ~ram_dsn & {2{~rw & oram_wr}};
 assign oram_cs  =  oram_wr & ~BUSn;
 
@@ -351,6 +341,7 @@ jt5911 #(.SIMFILE("nvram.bin")) u_eeprom(
 
 // The board seems to control DTACKn with combinational logic
 // DTACKn follows ASn with a delay of ~15.6ns
+wire slow_mem = rom_cs | ram_cs;
 jtframe_68kdtack_cen #(.W(6),.RECOVERY(1)) u_dtack(
     .rst        ( rst       ),
     .clk        ( clk       ),
@@ -359,18 +350,15 @@ jtframe_68kdtack_cen #(.W(6),.RECOVERY(1)) u_dtack(
     .bus_cs     ( bus_cs    ),
     .bus_busy   ( bus_busy  ),
     .bus_legit  ( 1'b0      ),
-    // 053990 (jtriders_tmnt2) can take real bus mastership for its DMA
-    // block-copy (BRn/BGACKn wired straight to the CPU's own arbitration
-    // pins below). While it holds the bus the 68000 isn't actually
-    // stalled by ROM/RAM latency -- bus_ack tells the recovery accounting
-    // not to charge that window as debt to be recovered later.
-    .bus_ack    ( ~prot_bgackn ),
+    // bus_ack tied low like riders/xmen (same 053990 DMA chip): 053990 bus timing
+    // is not independently verified as exempt from recovery accounting.
+    .bus_ack    ( 1'b0      ),
     .ASn        ( ASn       ),
     .DSn        ({UDSn,LDSn}),
     .num        ( 5'd1      ),  // numerator
     .den        ( 6'd3      ),  // denominator, 3 (16MHz)
     .DTACKn     ( DTACKn    ),
-    .wait2      ( 1'b0      ),
+    .wait2      ( slow_mem  ),  // RAM of that age didn't operate at 16MHz
     .wait3      ( 1'b0      ),
     // Frequency report
     .fave       (           ),

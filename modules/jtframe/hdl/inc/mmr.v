@@ -44,18 +44,9 @@ assign {{.Name}} = {
 
 always @(posedge clk) begin
     if( rst ) begin
-        // Was split `ifndef SIMULATION: INIT` / `else: mmr_init` (loaded
-        // from a SIMFILE via $fopen/$fread in the initial block below).
-        // No core in this repo has ever shipped a working SIMFILE for any
-        // MMR module (every instance's file has always been absent), and
-        // referencing INIT from that initial block -- through any of
-        // $fread, a byte-by-byte $fgetc loop, blocking or non-blocking
-        // assignment, direct-parameter or local-wire indexing, the
-        // module's own unmodified default value included -- segfaults the
-        // sim tool on this Windows toolchain (7 variants tried and ruled
-        // out; see D:\evidence\moo\log.md, 2026-09-02). Using INIT
-        // directly here, unconditionally, matches synthesis exactly and
-        // avoids that whole code path.
+        // INIT is used unconditionally so simulation matches synthesis.
+        // The old SIMFILE path ($fopen/$fread in an initial block) was
+        // never populated by any core and crashed the sim tool.
         for(i=0;i<SIZE;i=i+1) mmr[i] <= INIT[i*8+:8];
         {{ range .Regs }}{{ if .IsEvent }}
         {{.Name}} <= 0; {{ end }}{{- end }}{{ if not .Read_only }}
