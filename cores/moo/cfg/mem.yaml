@@ -45,7 +45,7 @@ sdram:
         - name: main
           addr_width: 21
           data_width: 16
-          cache_size: 1kB
+          cache_size: 32kB
     - buses:
         - name: snd
           addr_width: 18
