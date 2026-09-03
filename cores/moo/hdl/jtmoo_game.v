@@ -58,7 +58,6 @@ jtmoo_main u_main(
     .rst            ( rst           ),
     .clk            ( clk           ),
     .cen_16         ( cen_16        ),
-    .LVBL           ( LVBL          ),
     .bucky          ( bucky         ),
     .int1           ( int1          ),
 
