@@ -350,7 +350,14 @@ wire [11:0] layer_height, y_sum;
 wire [ 1:0] src_page_x, src_page_y, slot_lyr;
 wire [ 1:0] a_x, b_x, c_x, d_x, a_y, b_y, c_y, d_y,
             a_w, b_w, c_w, d_w, a_h, b_h, c_h, d_h;
-wire        a_covers, b_covers, c_covers, d_covers;
+wire        b_covers, c_covers, d_covers;
+// a_covers (does layer A's page cover this pixel) is deliberately not
+// computed: layer A is always slot_lyr==0, the lowest-priority tilemap
+// in the active_nx occlusion mux below, so nothing in this design ever
+// asks "is layer A covering the slot below it" -- there is no slot
+// below 0. Confirmed dead (H10): grep of the whole tree shows a_covers
+// assigned once (old line 410) and read nowhere; b/c/d_covers are the
+// real occluders, each used only by slots with lower priority than them.
 wire        assoc_disable, active_nx, tile_slot;
 wire [12:0] tile_ram_addr, line_ram_addr;
 wire [10:0] line_pair_off;
@@ -407,7 +414,6 @@ assign assoc_disable = (a_x==0 && a_y==0 && a_w==3 && a_h==3) ||
                        (b_x==0 && b_y==0 && b_w==3 && b_h==3) ||
                        (c_x==0 && c_y==0 && c_w==3 && c_h==3) ||
                        (d_x==0 && d_y==0 && d_w==3 && d_h==3);
-assign a_covers = (src_page_y - a_y) <= a_h && (src_page_x - a_x) <= a_w;
 assign b_covers = (src_page_y - b_y) <= b_h && (src_page_x - b_x) <= b_w;
 assign c_covers = (src_page_y - c_y) <= c_h && (src_page_x - c_x) <= c_w;
 assign d_covers = (src_page_y - d_y) <= d_h && (src_page_x - d_x) <= d_w;

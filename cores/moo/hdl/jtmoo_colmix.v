@@ -216,6 +216,15 @@ function [7:0] mix_blend(input [7:0] front, input [7:0] back, input [7:0] level,
     reg [ 8:0] asum;
 begin
     inv9 = 9'd256 - {1'b0,level};
+    // inv5/aprod/asum are only meaningful in the additive branch, and
+    // sum only in the interpolation branch; give every local a default
+    // here purely so Quartus sees all paths assigned (10776) -- each is
+    // fully overwritten before its one read below, so this cannot change
+    // mix_blend's value on any input.
+    inv5  = 6'd0;
+    sum   = 18'd0;
+    aprod = 14'd0;
+    asum  = 9'd0;
     if( additive ) begin
         inv5  = 6'd32 - {1'b0,level[7:3]};
         aprod = back * inv5;
@@ -242,6 +251,12 @@ endfunction
 function [23:0] apply_bright(input [23:0] rgb, input en, input [7:0] lvl);
     reg [15:0] pb, pg, pr;
 begin
+    // pb/pg/pr are only read inside the en branch, right after being
+    // computed there; this default only satisfies Quartus's all-paths-
+    // assigned check (10776) and cannot change apply_bright's value.
+    pb = 16'd0;
+    pg = 16'd0;
+    pr = 16'd0;
     if( en ) begin
         pb = rgb[23:16] * lvl;
         pg = rgb[15: 8] * lvl;

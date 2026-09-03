@@ -256,7 +256,12 @@ endfunction
 // clamp to int16
 function signed [15:0] clip16(input signed [23:0] v);
     clip16 = (v >  24'sd32767) ? 16'sd32767 :
-             (v < -24'sd32768) ? -16'sd32768 : v[15:0];
+             // 16'sh8000 is the same 0x8000 bit pattern (== -32768 signed)
+             // that -16'sd32768 wrapped to, without the 10259 constant-
+             // overflow warning: a signed decimal literal magnitude of
+             // 32768 does not fit in 16 bits, but a hex literal's bit
+             // pattern is taken directly, so 16'sh8000 hits -32768 exactly.
+             (v < -24'sd32768) ? 16'sh8000 : v[15:0];
 endfunction
 // live PCM trim: (PCM*pg) >> 3, clamped. pg comes from debug_bus[7:4] (below).
 function signed [15:0] trimg(input signed [15:0] pcm16, input [4:0] pg);
