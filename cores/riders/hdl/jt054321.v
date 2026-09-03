@@ -2,7 +2,10 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  * Date: 4-8-2024 */
 
-module jt054321(
+// AUDIO=0 (default) keeps the historical behaviour exactly: the volume register
+// is maintained but never applied, and snd_l/snd_r pass straight through.
+// AUDIO=1 applies the global volume to the audio pair (Moo Mesa, C6).
+module jt054321 #(parameter AUDIO=0)(
     input            rst,
     input            clk,
     input      [3:0] maddr,
@@ -18,7 +21,19 @@ module jt054321(
     // Z80 bus control
     input            snd_on,
     input            siorq_n,
-    output reg       int_n
+    output reg       int_n,
+
+    // SND~PAL8 (Moo Mesa 054744 PAL16L8 pin 12 -> U2 pin 24). What the 054321
+    // does with it is unknown: neither MAME's k054321 nor Furrtek's die trace
+    // models this pin. Accepted and deliberately unused so the board's wiring
+    // is represented in the port list. Class HYPOTHESIS. C7.
+    input            pal8_n,
+
+    // Audio pair, only touched when AUDIO=1
+    input signed [15:0] snd_l,
+    input signed [15:0] snd_r,
+    output signed [15:0] out_l,
+    output signed [15:0] out_r
 );
 
 reg [7:0] snd_latch[0:2];
@@ -59,5 +74,66 @@ always @(posedge clk) begin
         sdin <= saddr[0] ? snd_latch[1] : snd_latch[0];
     end
 end
+
+// Global volume (C6). Attenuation law from MAME src/devices/sound/k054321.cpp:
+//     vol = powf(2.0f, (m_volume - 40)/10.0f)
+// i.e. gain RISES with vol (the register at maddr==3 is "volume up") and the
+// law is exponential, ~0.6 dB per step, unity at vol==40 which MAME documents
+// as "normal". NOTE: audit/remaining_plan.md C6 asks for (64-vol)>>6, which is
+// the wrong direction and would turn every fade-in into a fade-out; the MAME
+// source above is the better evidence and is what is implemented here.
+// The clamp at unity is ours: MAME's law exceeds 1.0 above vol==40, which a
+// float mixer tolerates and a fixed-point path would clip. Clamping keeps
+// vol==40 at exactly the pre-C6 level, so this is purely additive fade depth.
+// Class INFERRED (real chip's law undocumented).
+// Known deviation, left alone on purpose to keep this shared module's diff
+// additive: MAME only increments on a non-zero data write; the loop above
+// increments on any write to maddr==3. Harmless while AUDIO=0 (vol unread).
+reg [8:0] gain;     // 1/256 units, 0..256
+
+always @(*) begin
+    case(vol)
+        6'd0 : gain = 9'd16;   6'd1 : gain = 9'd17;   6'd2 : gain = 9'd18;
+        6'd3 : gain = 9'd20;   6'd4 : gain = 9'd21;   6'd5 : gain = 9'd23;
+        6'd6 : gain = 9'd24;   6'd7 : gain = 9'd26;   6'd8 : gain = 9'd28;
+        6'd9 : gain = 9'd30;   6'd10: gain = 9'd32;   6'd11: gain = 9'd34;
+        6'd12: gain = 9'd37;   6'd13: gain = 9'd39;   6'd14: gain = 9'd42;
+        6'd15: gain = 9'd45;   6'd16: gain = 9'd49;   6'd17: gain = 9'd52;
+        6'd18: gain = 9'd56;   6'd19: gain = 9'd60;   6'd20: gain = 9'd64;
+        6'd21: gain = 9'd69;   6'd22: gain = 9'd74;   6'd23: gain = 9'd79;
+        6'd24: gain = 9'd84;   6'd25: gain = 9'd91;   6'd26: gain = 9'd97;
+        6'd27: gain = 9'd104;  6'd28: gain = 9'd111;  6'd29: gain = 9'd119;
+        6'd30: gain = 9'd128;  6'd31: gain = 9'd137;  6'd32: gain = 9'd147;
+        6'd33: gain = 9'd158;  6'd34: gain = 9'd169;  6'd35: gain = 9'd181;
+        6'd36: gain = 9'd194;  6'd37: gain = 9'd208;  6'd38: gain = 9'd223;
+        6'd39: gain = 9'd239;
+        default: gain = 9'd256;         // vol>=40 -> unity
+    endcase
+end
+
+generate
+    if( AUDIO==1 ) begin : g_audio
+        // 16s x 10s = 26 bits; |product| <= 2^23 so bits 23:8 are the /256 result
+        reg signed [25:0] mul_l, mul_r;
+        always @(posedge clk) begin
+            if( rst ) begin
+                mul_l <= 26'd0;
+                mul_r <= 26'd0;
+            end else begin
+                mul_l <= snd_l * $signed({1'b0,gain});
+                mul_r <= snd_r * $signed({1'b0,gain});
+            end
+        end
+        assign out_l = mul_l[23:8];
+        assign out_r = mul_r[23:8];
+    end else begin : g_bypass
+        assign out_l = snd_l;
+        assign out_r = snd_r;
+    end
+endgenerate
+
+`ifdef SIMULATION
+wire unused_54321 = &{ 1'b0, pal8_n };
+`endif
 
 endmodule

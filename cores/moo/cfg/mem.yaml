@@ -34,7 +34,10 @@ sdram:
           addr_width: 18
           data_width: 8
         - name: pcm
-          addr_width: 21
+          # 22 bits (4 MB): Moo Mesa only populates B6 (2 MB, 151a08.b6) but
+          # Bucky O'Hare also populates A6, selected by the K054539's ROBS
+          # output (E4 pin 111, N.C. on Moo Mesa). C8.
+          addr_width: 22
           data_width: 8
           offset: PCM_OFFSET
     - buses:

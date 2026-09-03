@@ -34,8 +34,9 @@ module jtmoo_sound(
     output  reg     rom_cs,
     input   [ 7:0]  rom_data,
     input           rom_ok,
-    // PCM ROM
-    output  [20:0]  pcm_addr,
+    // PCM ROM. 22 bits: Moo Mesa only populates B6 (2 MB) but Bucky O'Hare also
+    // populates A6, selected by the K054539's ROBS output -> 4 MB total. C8.
+    output  [21:0]  pcm_addr,
     input   [ 7:0]  pcm_data,
     output          pcm_cs,
     // Sound output
@@ -54,7 +55,23 @@ wire        m1_n, mreq_n, rd_n, wr_n, iorq_n, rfsh_n, nmi_n,
             cpu_cen, fm_intn, latch_we, int_n;
 reg         ram_cs, fm_cs, k39_cs, k21_cs, bank_we, mem_acc, nmi_clr;
 wire signed [15:0] fm_l, fm_r;
-wire [ 2:0] nc;
+// K054539 output before the K054321's global volume stage
+wire signed [15:0] pcm_l, pcm_r;
+wire [ 1:0] nc;         // C8: pcm_addr is now 22 bits, rom_addr is 24
+
+// 054744 (PAL16L8) pin 12, SND~PAL8 -> J2 a39/b39 -> U2.24 on the 054986A
+// daughterboard. Transcribed from the fusemap in doc/054744:
+//   SND/PAL8 = !( A15 & A14 & A13 & !A12 & A11 & A10     ; EC00-EFFF (YM2151)
+//               + /M1 & !A15 & A14                       ; 4000-7FFF
+//               + /M1 & !A14 )                           ; 0000-3FFF, 8000-BFFF
+// Documented only: what the K054321 does with this pin is unknown, and neither
+// MAME's k054321 nor Furrtek's die trace models it. Class HYPOTHESIS, C7.
+// Caveat: doc/054744 lists pin 1 as "/M1 (Z80 ~M1)" but annotates these terms
+// "M1 fetch", which are opposite readings of the same literal. The M1-active
+// reading is used here; it is not relied upon, since nothing consumes the pin.
+wire snd_pal8_n = ~( ( A[15] &  A[14] & A[13] & ~A[12] & A[11] & A[10] ) |
+                     ( ~m1_n & ~A[15] & A[14] )                          |
+                     ( ~m1_n & ~A[14] ) );
 
 assign latch_we = k21_cs && !wr_n;
 // C7 (74LS157): A[15]=0 selects {GND,GND,GND,A14}, A[15]=1 selects the bank latch
@@ -177,15 +194,18 @@ jt539 #(.VOLSHIFT(1)) u_k54539(
     // YM2151 serial output mixed in by the K054539 (AUX1 on the schematics)
     .aux_l      ( fm_l      ),
     .aux_r      ( fm_r      ),
-    // Sound output
-    .left       ( k539_l    ),
-    .right      ( k539_r    ),
+    // Sound output, before the K054321 volume stage
+    .left       ( pcm_l     ),
+    .right      ( pcm_r     ),
     // debug
     .debug_bus  ( debug_bus ),
     .st_dout    ( st_dout   )
 );
 
-jt054321 u_54321(
+// The K054321 sits in series with the only audio path on the board:
+// E4 FRDT/WDCK/LRCK -> U2.1/2/3, U2.9/10/11 -> U1 AD1868 -> 1B1 LA4705.
+// AUDIO(1) makes its global volume register act on the K054539 pair. C6.
+jt054321 #(.AUDIO(1)) u_54321(
     .rst        ( rst       ),
     .clk        ( clk       ),
     .maddr      ( main_addr ),
@@ -201,7 +221,15 @@ jt054321 u_54321(
     // Z80 bus control
     .snd_on     ( snd_irq   ),
     .siorq_n    ( iorq_n    ),
-    .int_n      ( int_n     )
+    .int_n      ( int_n     ),
+
+    // C7: accepted, unused inside the module
+    .pal8_n     ( snd_pal8_n),
+    // C6: global volume applied to the K054539 pair
+    .snd_l      ( pcm_l     ),
+    .snd_r      ( pcm_r     ),
+    .out_l      ( k539_l    ),
+    .out_r      ( k539_r    )
 );
 `else
 initial rom_cs   = 0;
