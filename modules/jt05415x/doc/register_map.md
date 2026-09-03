@@ -1,75 +1,156 @@
-# K054156/K054157 Register Map Notes
+# K054157 register file (0x0D8000-0x0D8007, `BNK~SCR`)
 
-These notes relate the MAME `k054156_k054157_k056832` register map to the
-current HDL extraction in `modules/jt05415x/hdl/jt054156.v` and
-`modules/jt05415x/hdl/jt054157.v`.
+Written 2026-09-03 for Group 2 item B2 of `D:\evidence\moo\audit\remaining_plan.md`.
+Covers the 14 fields `jt054157_mmr.v` decodes from `modules/jt05415x/cfg/mmr.yaml`
+(the 054157's own 4-word CPU register window, separate from the 054156's
+32-word window at 0x0C0000).
 
-MAME uses two CPU-visible banks for the Moo Mesa board:
+Evidence used, in order:
 
-- `0x0c0000-0x0c003f`: first bank, handled by `k056832_device::word_w`.
-- `0x0d8000-0x0d8007`: second bank, handled by `k056832_device::b_word_w`.
+1. Furrtek SiliconRE `054157/README.md` (tier 1, die-level, applies to the
+   physical chip regardless of board).
+2. MAME register-write trace, Moo Mesa (moomesa), coin+start preset, 3600
+   frames: `D:\evidence\moo\mame\k054157_regwrites_3600f.jsonl` (10083
+   records). Extracted per-address value history with a throwaway script
+   (`D:\vibes\...\scratchpad\analyze157.py` / `analyze157b.py`); not
+   re-ingested verbatim per the project's trace-handling rule.
+3. `modules/jt05415x/cfg/mmr.yaml` field descriptions (the names/guesses
+   already present in the tree before this pass; kept where evidence agrees,
+   corrected in comments where it does not).
+4. `register_map_054156157_netlist_notes.md` (same directory) -- a second,
+   independent tier-1 source for the same 4-word register window, derived
+   from the `doc/054156/jt054156.v` netlist-conversion reference rather than
+   the README. This file used to occupy this document's path (git history:
+   commit `bf4a22c`, 2026-09-01); this B2 pass replaced it with the present,
+   live-RTL-accurate content and moved the original to its own file rather
+   than discard it, since it independently corroborates two findings below.
 
-The first bank maps to `jt054156`. The second bank maps to the CPU entry
-registers in `jt054157`.
+The board writes exactly four words (0x0D8000, 0x0D8002, 0x0D8004, 0x0D8006);
+each word's low byte is the register the README documents as "00", "02",
+"04", "06". The CPU always writes the same value into both bytes of a word on
+this ROM (word = {byte,byte}), so only 8 bits of state exist per register.
 
-## First Bank, K054156
+## Register 0x00 (`mmr[0]`) -- steady value 0x08 -> 0x48 at frame 409 (PC 0x19D6)
 
-| Byte offset | HDL register | Current HDL interpretation | MAME status |
-| --- | --- | --- | --- |
-| `0x00` | `reg0_db` | Global/timing control. Bit 4 is H flip, bit 5 is V flip. Other bits feed timing, VRAM strobe, VD latch, and RAM address path controls. | Flip bits match. Other MAME notes are too broad for the extracted K054156 behavior. |
-| `0x02` | `reg2_db` | Per-layer flip-enable bitmap. H flip enable uses bits `0/2/4/6`; V flip enable uses bits `1/3/5/7`. | MAME leaves this unknown. |
-| `0x04` | `reg4_db` | Tile attribute, LUT/color source, CPU address latch width/shift, and high-output selection control. | MAME's possible bank-count note is too narrow. |
-| `0x06` | `reg6_db` | Bits `0/1/2` gate IRQ/FIRQ/NMI. Bit 3 steers VRAM chip select. Bit 4 selects VD byte pair for attribute decode. Bit 5 steers CPU data bus halves. Bits `6/7` select color/attribute sources. | IRQ note matches low bits; attribute note is plausible but incomplete. |
-| `0x08` | `reg8_db` | Bits `0..3` are per-layer low CA/VA address-source mode bits. Bits `4..7` are per-layer vertical scroll/size mux enables. | MAME's lower-nibble tile mode is plausible but should be understood as address/source mode. Upper nibble roughly matches synchronous scroll behavior. |
-| `0x0a` | `rega_db` | Two bits per layer for line-scroll behavior. Even bits `0/2/4/6` select CPU X-scroll register versus latched line-scroll data. Odd bits `1/3/5/7` control line-scroll tick capture. | Good structural match to MAME's linescroll control. |
-| `0x0c` | `regc_db` | CPU/VRAM DB output selection, VRAM strobe selection, RAM address high-bit shift, and active-page/address timing. | MAME's possible bank-size note is too narrow. |
-| `0x10,0x12,0x14,0x16` | `reg10_d..reg16_d` | Vertical layer grid/size. Bits `[5:3]` feed `vs_mux`; bits `[2:0]` feed `vb_mux`. | Matches MAME Y position/height notes. |
-| `0x18,0x1a,0x1c,0x1e` | `reg18_d..reg1e_d` | Horizontal layer grid/size. Bits `[5:3]` feed `hs_mux`; bits `[2:0]` feed `hb_mux`. | Matches MAME X position/width notes. |
-| `0x20,0x22,0x24,0x26` | `reg20_d..reg26_d` | Layer Y scroll registers. | Matches MAME. |
-| `0x28,0x2a,0x2c,0x2e` | `reg28_d..reg2e_d` | Layer X scroll registers. | Matches MAME. |
-| `0x30` | `reg30_d` | Line-scroll / active-page bank source for VA high bits. | Matches MAME's linescroll RAM bank role. |
-| `0x32` | `reg32_d` | CPU-visible VRAM bank source for VA high bits. | Matches MAME's CPU RAM bank role. |
-| `0x34` | `reg34l_d`, `reg34u_d` | ROM/checksum bank path. `reg34l_d[0]` feeds `CA11`; `reg34l_d[1:7]` feed `CA12..CA18`; `reg34u_d[0:7]` drive `COL0..COL7` in ROM/checksum mode. | MAME's ROM bank naming is materially correct. |
-| `0x36` | `reg36_d` | Two VRC bits only, feeding `pin_vrc[1:0]`. | MAME models four secondary ROM-bank bits; the HDL only supports two bits so far. |
-| `0x38` | `reg38_d` | Four-entry tile-bank lookup table. Each entry is four bits selected by tile LUT address bits. | Matches MAME. |
-| `0x3a` | `reg3a_d` | HFLIP horizontal correction, gated by global H flip. | Matches newer MAME comments. |
-| `0x3c` | `reg3c_d` | VFLIP vertical correction, gated by global V flip. | Matches newer MAME comments. |
+| bit | field (yaml)  | README meaning                         | trace behaviour                          | evidence class |
+|-----|---------------|------------------------------------------|-------------------------------------------|-----------------|
+| 0   | `hofs_phase`  | "Number of layers 2/4, 0:2 1:4"          | always 0                                   | HYPOTHESIS (README's meaning conflicts with Moo Mesa using 4 active pipelines at bit=0; not wired, see below) |
+| 3   | `clk_fanout`  | "?" (undocumented)                       | always 1                                   | HYPOTHESIS |
+| 4   | `ram_clkph`   | "Enable full display horizontal flip" (reg shared with 054156) | always 0 | INFERRED -- matches `glob_ctrl[4]`=0 (054156's own H-flip bit, already wired to `flip` in `jt05415x.v:118`); this 054157-side copy looks redundant with that bit and is not separately consumed by the pixel pipeline, so it is left unwired |
+| 6   | (none)        | not documented anywhere                  | 0 until frame 409 (PC 0x19D6), then 1 for the rest of the run | HYPOTHESIS -- observed but has no candidate function; not one of the 14 originally-decoded fields, so no port exists for it and none is added here (would be inventing a mux) |
 
-Offsets `0x0e` and `0x3e` are unused in the decoded HDL, matching MAME.
+Reg 0x00 bit 0 reading "number of layers" at value 0 is inconsistent with Moo
+Mesa's RTL always running four independent tilemap pipelines; either the
+polarity is inverted from the README's phrasing, or this bit governs an
+internal fetch/clock mode unrelated to which of the four externally-visible
+pipelines are populated (the RTL never gates layer count on any register).
+Left as HYPOTHESIS and unwired -- do not invent the mux.
 
-## Second Bank, K054157
+## Register 0x02 (`mmr[2]`) -- steady value 0xFF from frame 8 onward, never rewritten
 
-The second bank is not a copy of first-bank offsets `0x02..0x07`. The HDL
-captures only selected low-byte bits in `jt054157_page02_cpu_entry`.
+| bit | field         | README meaning                    | trace value | action |
+|-----|---------------|------------------------------------|-------------|--------|
+| 0   | `a_hofs_flip` | "Enable tile X flips" (paired with HOFSA / layer F) | 1 | **wired** |
+| 2   | `b_hofs_flip` | same, paired with HOFSB / layer A  | 1 | **wired** |
+| 4   | `c_hofs_flip` | same, paired with HOFSC / layer B  | 1 | **wired** |
+| 6   | `d_hofs_flip` | same, paired with HOFSD / layer C  | 1 | **wired** |
 
-| Byte offset | Captured CPU DB bits | HDL names | Current HDL interpretation |
-| --- | --- | --- | --- |
-| `0x00` | DB0, DB3, DB4 | `reg0_d0`, `reg0_d3`, `reg0_d4` | Global H offset phase/polarity, page-1 clock fanout reset/enable, and page-9 RAM/readout clock phase selection. |
-| `0x02` | DB0, DB2, DB4, DB6 | `reg2_d0`, `reg2_d2`, `reg2_d4`, `reg2_d6` | Per-layer H offset flip enables for HOFSA, HOFSB, HOFSC, and HOFSD. |
-| `0x04` | DB3, DB4, DB5, DB6 | `reg4_d3`, `reg4_d4`, `reg4_d5`, `reg4_d6` | RAM/readout/output mux mode, DB output mux selection, and readout/VC direction control. |
-| `0x06` | DB5, DB6, DB7 | `reg6_d5`, `reg6_d6`, `reg6_d7` | DB half/byte-lane selection and color/attribute column source selection. |
+KNOWN from the README ("02[7:0]: Some bits shared with 054156; 0,2,4,6:
+Enable tile X flips"), independently corroborated by
+`register_map_054156157_netlist_notes.md`'s netlist-conversion-derived
+reading of the same 4 bits ("Per-layer H offset flip enables for HOFSA,
+HOFSB, HOFSC, and HOFSD") -- two different tier-1 sources agree. This
+directly contradicts the plan's original working hypothesis (that these
+bits select/negate the HOFSA..HOFSD constant offsets) -- there is no README
+or netlist-reference support for an offset-sign or phase-select reading, and
+the yaml's own pre-existing field description ("HOFSA flip enable") already
+agreed with both tier-1 sources rather than the sign-select hypothesis.
+Implemented as: `<layer>_hf <= tflip[0] & <x>_hofs_flip;` in
+`jt05415x.v` (gates the per-tile horizontal-flip attribute bit, does not
+touch the HOFSA..HOFSD position constants). Because the ROM holds all four
+bits at 1 for the entire traced run (frame 8 through 3599, coin+start+3600f),
+this is a no-op today -- it removes genuinely dead register-file code and is
+INFERRED-safe (no way to observe the bit=0 case from this ROM alone; a
+title that sets it to 0 would be needed to fully confirm the AND-gate
+semantics rather than some other "enable" mechanism).
 
-## MAME Differences
+## Register 0x04 (`mmr[4]`) -- steady value 0x60 from frame 8 onward
 
-- The MAME comment that second-bank registers `0x02..0x07` copy first-bank
-  `0x02..0x07` is wrong for the current K054156/K054157 HDL.
-- MAME stores second-bank registers as full 16-bit words, but the HDL captures
-  only specific low-byte bits.
-- MAME's first-bank `0x36` four-bit secondary ROM bank does not match the HDL,
-  which captures only `reg36_d[1:0]`.
-- MAME's first-bank `0x08` lower nibble is best described as per-layer
-  address/source mode, not just a tilemap dirty flag.
+| bit | field         | README meaning        | trace value | evidence class |
+|-----|---------------|------------------------|-------------|-----------------|
+| 3   | `ramout_mux`  | "?" (reg 04 bits 6:4 undocumented beyond "select 8/16bit mode?") | 0 | HYPOTHESIS |
+| 4   | `dbout_mux`   | "                                                              " | 0 | HYPOTHESIS |
+| 5   | `vc_dir`      | possibly the "select 8/16-bit mode" bit README mentions        | 1 | HYPOTHESIS |
+| 6   | `crom_decode` | "                                                              " | 1 | HYPOTHESIS |
 
-## Source Pointers
+README: "04[7:0]: Some bits shared with 054156; [6:4]: ?; 3: Select 8/16bit
+mode ?" -- itself marked uncertain by Furrtek. Constant for the whole run;
+left in `unused_157` per the plan's rule 5 (fields the ROM never changes from
+reset stay constants).
 
-- MAME address map: `cores/moo/doc/moo.cpp`, `moo_prot_state::moo_map`.
-- MAME device model: `modules/jt05415x/doc/mame/k054156_k054157_k056832.cpp`.
-- K054156 register decode: `jt054156_page01_low_reg_wr_decode`,
-  `jt054156_page01_reg_wr_decode`, and `jt054156_page02_low_regs`.
-- K054156 scroll and bank paths: `jt054156_page05_start_size_mux`,
-  `jt054156_page07_xsrc`, `jt054156_page08_scrolly_mux`,
-  `jt054156_page10_va_high`, `jt054156_page12_ca_low`, and
-  `jt054156_page12_ca_col_high`.
-- K054157 second bank: `jt054157_page02_cpu_entry`, page-5 H offset paths,
-  page-8 DB output muxes, page-9 RAM/readout control, and page-11 readout
-  output paths.
+## Register 0x06 (`mmr[6]`) -- transient 0x00 at frames 405-407 (reset/init), settles to 0xD0 from frame ~408 onward, rewritten ~10000 times/run at the same constant value (multiple PCs inside the per-layer scroll-update routine: 0x24ca/0x2516/0x25f8)
+
+| bit | field       | README meaning                                             | trace value | evidence class |
+|-----|-------------|--------------------------------------------------------------|-------------|-----------------|
+| 5   | `db_lane`   | "5: 1=8-bit ROM access, 0=16-bit"                             | 0 (16-bit)  | KNOWN (matches the board: T8/T10 065A08 ROMs are wired for 16-bit access, `scroll.md` GAP-free MATCH section) -- constant, left in `unused_157` |
+| 6   | `col_src0`  | "[7:6]: Choice of bits in VRAM attribute for X/Y tile flip"  | 1           | INFERRED -- see B3 note below |
+| 7   | `col_src1`  | same field, other bit                                        | 1           | INFERRED -- see B3 note below |
+
+Despite the high write rate, the *value* never changes after the frame
+405-407 reset transient -- the driver simply rewrites the same constant
+every time it touches any of the four layers' scroll registers (a common
+Konami idiom, not a per-frame toggle). Per the plan's rule 5, a
+register whose value is observed constant stays in `unused_157`; the field
+identities below are recorded for B3 but not wired.
+
+### B3 note (col_src0/col_src1 vs. FPAL4/DFI8)
+
+The README's reading of reg 0x06 bits 7:6 ("choice of bits in VRAM attribute
+for X/Y tile flip") describes the *same kind of function* 054156 already
+performs with its own `irq_attr[7:6]`/`fbits` field (`jt05415x.v` `assign
+fbits = irq_attr[7:6]`), not a colour/palette-bit source selector. That
+argues AGAINST col_src0/1 being the source of the FPAL4/DFI8 (5th palette
+bit on layer "a") mux, independent of the fact that both bits are pinned at
+`11` for the whole run and therefore cannot be observed toggling either way.
+The Furrtek 054157 pinout (`054157_pinout.ods`, beeped from a Metamorphic
+Force donor chip -- die-level, board-independent) does independently confirm
+that the physical pin carrying DFI8 (die pin 137, documented there as pin
+"137 | BCOL8 | K055555 67 | From ROM data or attribute") is a genuinely
+muxed output at the die level, so *some* register bit does select it -- just
+not, on the available evidence, col_src0/1.
+
+Update after recovering `register_map_054156157_netlist_notes.md` (see
+above): that netlist-conversion-derived source describes the SAME two bits
+(reg 0x06 bits 6-7) as "color/attribute column source selection" -- a
+noticeably more specific, more B3-relevant reading than the README's "choice
+of bits in VRAM attribute for X/Y tile flip", and one that sits much closer
+to being the actual DFI8-source mux. This raises rather than lowers B3's
+priority for a follow-up pass (ideally reading `doc/054156/jt054156.v`'s
+actual gate-level definition of `jt054157_page02_cpu_entry` bits `reg6_d6`/
+`reg6_d7` directly, or finding a title that writes col_src0/1 to a non-`11`
+value). It still does not change today's conclusion: the bits are constant
+at `11` for the whole traced Moo Mesa run, so no A/B behavioural test is
+possible from this ROM, and the plan's "do not invent a mux" rule applies
+just as before. No RTL change made; current wiring (`tcolor[0]` ->
+`a_pal[4]`, a third-party/konami-fpga measurement, see
+`jtmoo_colmix.v:116-119`) stands, evidence class held at INFERRED (with a
+somewhat stronger competing candidate now on record than before).
+
+## Summary of fields left in `unused_157` (10 of 14)
+
+`hofs_phase, clk_fanout, ram_clkph, ramout_mux, dbout_mux, vc_dir,
+crom_decode, db_lane, col_src0, col_src1` -- every one of these is observed
+constant for the entire traced 3600-frame coin+start run
+(`k054157_regwrites_3600f.jsonl`), so there is no ROM-driven behaviour to
+implement, and their exact functions are HYPOTHESIS (README marks most of
+them "?" itself) or INFERRED-but-not-actionable (col_src0/1, db_lane). Per
+the plan's rule ("if the ROM trace shows they never change, leave them in
+unused_157 with a comment citing the trace file"), no further RTL change is
+made for these 10 fields.
+
+## Fields wired (4 of 14)
+
+`a_hofs_flip, b_hofs_flip, c_hofs_flip, d_hofs_flip` -- wired as per-layer
+tile-horizontal-flip enables in `jt05415x.v` (KNOWN function from the
+Furrtek README; INFERRED-safe wiring since the ROM never exercises the 0
+state).

@@ -26,6 +26,12 @@ module jt054338 #(
     output            brtpri,
     output            clipsl,
     output     [23:0] dump_mmr,
+    // B7: brightness codes 1-3 (registers 11-12, Furrtek 054338 README).
+    // Only bri1_lvl is selected on Moo Mesa (BRI1 pin tied on the board, see
+    // jtmoo_colmix.v); bri2_lvl/bri3_lvl are exposed for completeness.
+    output     [ 7:0] bri1_lvl,
+    output     [ 7:0] bri2_lvl,
+    output     [ 7:0] bri3_lvl,
 
     output signed [9:0] shadow_r,
     output signed [9:0] shadow_g,
@@ -35,7 +41,8 @@ module jt054338 #(
 localparam BGC_R   =  4'd0,
            BGC_GB  =  4'd1,
            SHAD1R  =  4'd2,
-           BRI3    =  4'd11,
+           BRI3    =  4'd11, // register 11: brightness code 1 (README); name
+                              // predates B7 and is kept for dump_mmr compat
            PBLEND  =  4'd13,
            CONTROL =  4'd15;
 
@@ -65,6 +72,12 @@ assign dump_mmr    = { regs[CONTROL][7:0], regs[BRI3][7:0], regs[PBLEND][7:0] };
 assign shadow_r    = {shd_r9[8], shd_r9};
 assign shadow_g    = {shd_g9[8], shd_g9};
 assign shadow_b    = {shd_b9[8], shd_b9};
+
+// B7: reg 11[7:0] = brightness code 1; reg 12[15:8]/[7:0] = codes 2/3
+// (Furrtek 054338 README). Word-wide registers like the rest of this file.
+assign bri1_lvl    = regs[BRI3][7:0];
+assign bri2_lvl    = regs[BRI3+4'd1][15:8];
+assign bri3_lvl    = regs[BRI3+4'd1][7:0];
 
 always @(posedge clk, posedge rst) begin
     if( rst ) begin

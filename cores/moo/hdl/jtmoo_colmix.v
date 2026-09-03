@@ -69,6 +69,9 @@ wire signed [9:0] shad_r, shad_g, shad_b;
 wire [23:0] k338_bg;
 wire [ 7:0] alpha_level;
 wire        alpha_add, pblend0;
+wire [ 7:0] bri1_lvl, bri2_lvl, bri3_lvl; // B7; only bri1_lvl is used (BRI1 tied)
+wire [23:0] k338_dump; // E3: K054338 CONTROL/BRI3/PBLEND dump byte, see below
+wire [ 7:0] k251_dump; // E3: K053251 register dump byte (was: module's own dump_mmr output)
 // K053251 inputs
 wire [ 5:0] pri0;
 wire [ 8:0] ci0, ci1, ci2;
@@ -94,6 +97,19 @@ reg         fixop_a, blend_a;
 wire        f_wr_r, f_wr_g, f_wr_b;
 wire [ 7:0] f_pal_r, f_pal_g, f_pal_b;
 reg  [ 7:0] fr8, fg8, fb8;
+// B5: the board latches plane 0's CO bus in L7 (74LS273, clocked by MCLK2)
+// and its mux-select term in K7.2 (74LS74, same clock) before the 74LS157
+// muxes into COL0..10 -- one MCLK2 later than the 054157 emits it, and one
+// cycle later than the K053251's own ci2/ci3/ci4 inputs are sampled (see
+// 053252.kicad_sch L7/K7.2; jtcolmix_053251.v samples ci* then registers
+// cout one pxl_cen later). Without this stage plane 0 is one pixel early
+// relative to the mixed layers -- KNOWN (board latch), INFERRED (net visual
+// effect, since the true MCLK2:pxl_cen ratio is not established from the
+// captured sheets). lyrf_l is used everywhere lyrf_pxl fed the mixer output
+// side; the u_fpal_* CPU write side is untouched (it never used lyrf_pxl).
+reg  [11:0] lyrf_l;
+wire        mcol_bri;
+reg         bri_l;
 
 // The K054338 sees the palette as xRGB_888, big endian: the even word holds
 // the red byte in D[7:0], the odd word holds green in D[15:8] and blue in
@@ -118,21 +134,52 @@ assign ci1       = 9'd0;
 // through to the K053251's CI28 pin. On the board this is the per-tile
 // blend-enable flag for layer a -- see jt05415x.v tcolor[0]/a_pal[4].
 assign ci2       = { lyra_pxl[8], lyra_pxl[7:4], lyra_pxl[3:0] };
-assign ci3       = { 1'b0, lyrb_pxl[6:4], lyrb_pxl[3:0] }; // only CI30..CI36 wired
+// CI3 (plane 2, board nets DSB0..DSB7): the low nibble (lyrb_pxl[3:0]) is
+// the ROM colour, wired directly (DSB0..3 = CCOL0..3 on the 054157 die,
+// "from ROM data" per the Furrtek 054157 pinout). The high nibble is the
+// tile's 4-bit palette field (lyrb_pxl[7:4] = tcolor[5:2]), but the board
+// only routes its top three bits: DSB5..DSB7 = CI34..CI36 = lyrb_pxl[7:5].
+// DSB4 (the palette field's bottom bit, lyrb_pxl[4]) is CCOL4 on the die
+// (Furrtek 054157 pinout, die pin 128, tagged "From attribute" like
+// CCOL5..7) but is not routed to the K053251 on this board (053252.kicad_sch
+// M9 pin 64/CI37 is a no-connect and CI30..36 accounts for exactly the other
+// seven DSB bits) -- KNOWN, two independent sources (Moo Mesa capture +
+// Metamorphic Force die beep-out) agree pin128/DSB4 exists and is unrouted.
+assign ci3       = { 1'b0, lyrb_pxl[7:5], lyrb_pxl[3:0] }; // only CI30..CI36 wired
 assign ci4       = { lyrc_pxl[7:4], lyrc_pxl[3:0] };
 assign shd_in    = shadow;
 
 // MIX0 on the board is COL8 & ~COL9 & ~COL10 sampled on the K053251's own
 // output slot (H8/H9 mux I0 = M9), never on plane 0's slot -- see EVIDENCE.md.
+// B6 remainder: the 054338 has three independent mix codes (registers 13/14,
+// selected per pixel by MIX0/MIX1). MIX1 (J3 pin 49) is uncaptured on this
+// board and has no driver in the schematic -- left at pblend[1]=1'b0 below,
+// do not guess its polarity. A 3600-frame MAME register-write trace
+// (k054338_regwrites_3600f.jsonl, coin+start preset, EVIDENCE.md section 3)
+// shows the Moo Mesa ROM only ever writes mix code 1 (register 13); register
+// 14 (codes 2/3) is never touched. The single-code blend implemented here
+// (mix_blend below, selected whenever pblend0 is set) is therefore KNOWN
+// sufficient for Moo Mesa. RISK: Bucky O'Hare runs the same 054338/053251
+// pair and its MAME driver is not audited here -- if Bucky uses mix codes
+// 2/3 (via MIX1 or a different attribute-bit wiring) this single-code model
+// will under-blend it. Do not port this file's mix-code assumption to Bucky
+// without its own register trace.
 assign pblend0    = col[8] & ~col[9] & ~col[10];
 // Plane 0 (layer F) is the board's other alternating slot (H8/H9 mux I1 =
 // L7, the K054157 CO bus): when opaque and pblend0 is clear it still wins
 // outright with its own fixed palette bank, unchanged from before. When
 // pblend0 is set the K054338 blends it with the K053251 winner instead of
 // overriding it -- see the fr8/fg8/fb8 mirror lookup and the bgr mux below.
-assign p0_opaque  = |lyrf_pxl[3:0];
+assign p0_opaque  = |lyrf_l[3:0];
 assign mcol_blank = p0_opaque ? 1'b0 : col_n;
 assign mcol_shd   = p0_opaque ? 2'b0 : shd_out;
+// B7: BRI0 (the K054338 pin J3.156) is driven per pixel from the K053251's
+// BRIT output, forced low on the plane-0 bypass path by the 74LS157 I1 tie
+// (053252.kicad_sch H8, mirroring the NCOL/SHD0/SHD1 forcing already
+// modelled by mcol_blank/mcol_shd). HYPOTHESIS beyond that: the exact
+// digital scaling below is not on any captured schematic (BRIT[7:0] and the
+// DAC V-REF wiring are analogue and uncaptured, see colmix_rgb.md G-4/Q-4).
+assign mcol_bri   = p0_opaque ? 1'b0 : brit;
 assign pal_addr   = col;
 
 // Plane 0's own 256-entry bank (0x700-0x7FF), mirrored from the CPU's
@@ -183,6 +230,27 @@ begin
 end
 endfunction
 
+// B7: (x*bri1_lvl)>>8 per channel, applied to the final selected RGB triplet
+// when bri_l is set. BRI1 is tied on the board (colmix_rgb.md 1.3), so only
+// brightness code 1 (bri1_lvl, K054338 register 11) is ever selected here --
+// bri2_lvl/bri3_lvl are exposed on jt054338 for completeness but unused.
+// HYPOTHESIS: real silicon applies brightness in the analogue domain after
+// the DAC (BRIT[7:0] bus, uncaptured V-REF wiring); this digital
+// approximation cannot be checked against MAME (the ROM never writes a
+// non-zero brightness register -- see k054338_regwrites_3600f.jsonl) and is
+// only verified by a directed testbench forcing register 11.
+function [23:0] apply_bright(input [23:0] rgb, input en, input [7:0] lvl);
+    reg [15:0] pb, pg, pr;
+begin
+    if( en ) begin
+        pb = rgb[23:16] * lvl;
+        pg = rgb[15: 8] * lvl;
+        pr = rgb[ 7: 0] * lvl;
+        apply_bright = { pb[15:8], pg[15:8], pr[15:8] };
+    end else apply_bright = rgb;
+end
+endfunction
+
 always @(posedge clk, posedge rst) begin
     if( rst ) begin
         bgr     <= 0;
@@ -190,24 +258,29 @@ always @(posedge clk, posedge rst) begin
         blank_l <= 0;
         fixop_a <= 0;
         blend_a <= 0;
+        bri_l   <= 0;
+        lyrf_l  <= 0;
         {r8,g8,b8}    <= 0;
         {fr8,fg8,fb8} <= 0;
     end else begin
         { r8,  g8,  b8  } <= { pal_r,   pal_g,   pal_b   };
         { fr8, fg8, fb8 } <= { f_pal_r, f_pal_g, f_pal_b };
         if( pxl_cen ) begin
+            lyrf_l  <= lyrf_pxl;
             shd_l   <= mcol_shd;
             blank_l <= mcol_blank;
+            bri_l   <= mcol_bri;
             fixop_a <= p0_opaque;
             blend_a <= p0_opaque & pblend0;
-            bgr     <= !k338_video_en   ? 24'd0 :
+            bgr     <= apply_bright( !k338_video_en   ? 24'd0 :
                        blank_l          ? k338_bg :
                        fixop_a & ~blend_a ? { fb8, fg8, fr8 } :
                        fixop_a &  blend_a ? { mix_blend(fb8,b8,alpha_level,alpha_add),
                                                mix_blend(fg8,g8,alpha_level,alpha_add),
                                                mix_blend(fr8,r8,alpha_level,alpha_add) } :
                        ~|shd_l          ? { b8, g8, r8 } :
-                                          { add_clip(b8,shad_b,clipsl), add_clip(g8,shad_g,clipsl), add_clip(r8,shad_r,clipsl) };
+                                          { add_clip(b8,shad_b,clipsl), add_clip(g8,shad_g,clipsl), add_clip(r8,shad_r,clipsl) },
+                       bri_l, bri1_lvl );
         end
     end
 end
@@ -249,7 +322,10 @@ jt054338 u_k338(
     .shdpri      (                 ),
     .brtpri      (                 ),
     .clipsl      ( clipsl          ),
-    .dump_mmr    (                 ),
+    .dump_mmr    ( k338_dump       ),
+    .bri1_lvl    ( bri1_lvl        ),
+    .bri2_lvl    ( bri2_lvl        ),
+    .bri3_lvl    ( bri3_lvl        ),
 
     .shadow_r    ( shad_r          ),
     .shadow_g    ( shad_g          ),
@@ -280,12 +356,25 @@ jtcolmix_053251 u_k251(
     .shd_out    ( shd_out   ),
     // dump to SD card
     .ioctl_addr ( ioctl_ram ? ioctl_addr[3:0] : debug_bus[3:0] ),
-    .ioctl_din  ( dump_mmr  ),
+    .ioctl_din  ( k251_dump ),
 
     .cout       ( col       ),
     .brit       ( brit      ),
     .col_n      ( col_n     )
 );
+
+// E3: fold the K054338's own dump_mmr (CONTROL/BRI3/PBLEND, the only
+// registers jt054338.v exposes today) into the same debug/SD-dump byte this
+// module already exports for the K053251. jtcolmix_053251.v is shared with
+// cores/simson and cannot be edited (its own register-select mux is
+// unchanged); the second-source select below is local to jtmoo_colmix.v and
+// reuses a currently-unused address bit (ioctl_addr[4] / debug_bus[7]) that
+// the K053251 path never looked at (it only ever consumed bits [3:0]).
+wire       k338_dump_sel = ioctl_ram ? ioctl_addr[4] : debug_bus[7];
+wire [1:0] k338_byte_sel = ioctl_ram ? ioctl_addr[1:0] : debug_bus[1:0];
+wire [7:0] k338_byte = k338_byte_sel==2'd0 ? k338_dump[23:16] :
+                       k338_byte_sel==2'd1 ? k338_dump[15:8]  : k338_dump[7:0];
+assign dump_mmr = k338_dump_sel ? k338_byte : k251_dump;
 
 // G4: green plane
 jtframe_dual_ram #(.AW(11),.SIMFILE("pal_g.bin")) u_pal_g(
@@ -329,7 +418,7 @@ jtframe_dual_ram #(.AW(11),.SIMFILE("pal_b.bin")) u_pal_b(
     .q1     ( pal_b         )
 );
 
-// Plane 0's own 256-entry mirror (0x700-0x7FF), read at lyrf_pxl[7:0] in
+// Plane 0's own 256-entry mirror (0x700-0x7FF), read at lyrf_l[7:0] in
 // parallel with the K053251 winner above -- see the f_wr_r/g/b comment and
 // the bgr mux. No SIMFILE: it is populated by the same CPU writes as the
 // main palette RAM well before any blend is exercised.
@@ -341,7 +430,7 @@ jtframe_dual_ram #(.AW(8)) u_fpal_g(
     .q0     (                   ),
     .clk1   ( clk               ),
     .data1  ( 8'd0              ),
-    .addr1  ( lyrf_pxl[7:0]     ),
+    .addr1  ( lyrf_l[7:0]       ),
     .we1    ( 1'b0              ),
     .q1     ( f_pal_g           )
 );
@@ -354,7 +443,7 @@ jtframe_dual_ram #(.AW(8)) u_fpal_r(
     .q0     (                   ),
     .clk1   ( clk               ),
     .data1  ( 8'd0              ),
-    .addr1  ( lyrf_pxl[7:0]     ),
+    .addr1  ( lyrf_l[7:0]       ),
     .we1    ( 1'b0              ),
     .q1     ( f_pal_r           )
 );
@@ -367,14 +456,20 @@ jtframe_dual_ram #(.AW(8)) u_fpal_b(
     .q0     (                   ),
     .clk1   ( clk               ),
     .data1  ( 8'd0              ),
-    .addr1  ( lyrf_pxl[7:0]     ),
+    .addr1  ( lyrf_l[7:0]       ),
     .we1    ( 1'b0              ),
     .q1     ( f_pal_b           )
 );
 
 `ifdef SIMULATION
-wire unused_colmix = &{ 1'b0, brit, blnk_sel, lyrb_pxl[7], lyrf_pxl[11:8],
-                        lyra_pxl[11:9], lyrb_pxl[11:8], lyrc_pxl[11:8] };
+// B4: lyrb_pxl[7] now feeds ci3 (was unused); lyrb_pxl[4] (DSB4/CCOL4, the
+// palette bit the board never routes to the K053251) is unused instead.
+// B7: brit now feeds bri_l via mcol_bri (was unused).
+// B7: bri2_lvl/bri3_lvl are exposed on jt054338 but never selected (BRI1 is
+// tied on the board, see the pblend0 comment above) -- expected unused.
+wire unused_colmix = &{ 1'b0, blnk_sel, lyrb_pxl[4], lyrf_l[11:8],
+                        lyra_pxl[11:9], lyrb_pxl[11:8], lyrc_pxl[11:8],
+                        bri2_lvl, bri3_lvl };
 `endif
 
 endmodule

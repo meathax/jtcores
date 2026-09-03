@@ -81,6 +81,12 @@ parameter SIMFILE156 = "rest.bin",
 // Per-layer horizontal offsets. MAME applies them with set_layer_offs and the
 // same values serve Moo Mesa and Bucky O'Hare, so they belong to the K054157
 // HOFSA..HOFSD phases rather than to the game.
+// NOTE (B2, see doc/register_map.md): the 054157 register file's
+// a..d_hofs_flip bits (mmr[0x02] bits 0/2/4/6) are NOT a sign/polarity
+// selector for these constants -- an earlier hypothesis, superseded by the
+// Furrtek 054157 README, which documents that exact register/bit group as
+// "Enable tile X flips" (per layer). They are wired below as a gate on each
+// layer's per-tile horizontal-flip attribute instead.
 localparam signed [12:0] HOFSA = -13'sd2,
                          HOFSB =  13'sd2,
                          HOFSC =  13'sd4,
@@ -477,7 +483,14 @@ always @(posedge clk) begin
         end else case( slot_l[1:0] )
             2'd0: begin
                 f_code<={vram1_scan,vram2_scan}; f_pal<={4'd0,tcolor[5:2]};
-                f_hf  <=tflip[0]; f_vf<=tflip[1]; f_en<=active_nx;
+                // a_hofs_flip (054157 reg 0x02 bit 0, paired with HOFSA/layer
+                // f) is a per-layer tile-X-flip ENABLE, not an offset sign --
+                // see modules/jt05415x/doc/register_map.md B2. KNOWN from the
+                // Furrtek README ("02[7:0]: bits 0,2,4,6 Enable tile X
+                // flips"); the Moo Mesa ROM leaves all four bits set (1) for
+                // the whole traced run (k054157_regwrites_3600f.jsonl), so
+                // this is a no-op today but removes dead-code register bits.
+                f_hf  <=tflip[0] & a_hofs_flip; f_vf<=tflip[1]; f_en<=active_nx;
             end
             2'd1: begin
                 a_code<={vram1_scan,vram2_scan};
@@ -486,16 +499,26 @@ always @(posedge clk) begin
                 // board: FPAL4 (K054157 DFI8, layer a only) carries it to
                 // the K053251's CI28 pin, landing in a_pal[4] -> lyra_pxl[8]
                 // -> ci2[8] in jtmoo_colmix -- the 054338 blend-enable flag.
+                // B3 (source of FPAL4/DFI8): the 054157 die pinout (Furrtek
+                // beep-out, Metamorphic Force donor) tags this exact physical
+                // pin (die pin 137, the 9th bit of the "B" colour pipeline)
+                // "From ROM data or attribute", i.e. it IS a muxed bit at the
+                // die level. col_src0/col_src1 (register_map.md) are the
+                // only undocumented mmr bits that could select that mux, and
+                // they sit at reg 0x06 bits 6-7, held constant (=1,1) for the
+                // whole traced run -- consistent with, but not proof of,
+                // "attribute" being the selected source. INFERRED: keep the
+                // existing tcolor[0] wiring; do not add an unverified mux.
                 a_pal <={3'd0,tcolor[0],tcolor[5:2]};
-                a_hf  <=tflip[0]; a_vf<=tflip[1]; a_en<=active_nx;
+                a_hf  <=tflip[0] & b_hofs_flip; a_vf<=tflip[1]; a_en<=active_nx;
             end
             2'd2: begin
                 b_code<={vram1_scan,vram2_scan}; b_pal<={4'd0,tcolor[5:2]};
-                b_hf  <=tflip[0]; b_vf<=tflip[1]; b_en<=active_nx;
+                b_hf  <=tflip[0] & c_hofs_flip; b_vf<=tflip[1]; b_en<=active_nx;
             end
             default: begin
                 c_code<={vram1_scan,vram2_scan}; c_pal<={4'd0,tcolor[5:2]};
-                c_hf  <=tflip[0]; c_vf<=tflip[1]; c_en<=active_nx;
+                c_hf  <=tflip[0] & d_hofs_flip; c_vf<=tflip[1]; c_en<=active_nx;
             end
         endcase
         slot_l <= hdump[2:0];
@@ -565,9 +588,11 @@ always @(posedge clk) begin
 end
 wire unused_156 = &{ 1'b0, attr_ctrl, addr_ctrl, vram_ctrl, rom_col, rom_vrc,
                      tile_lut, cpu_bank[5:4], cpu_bank[2:1], lnscr_bank[5:1] };
+// a..d_hofs_flip are wired above (tile-X-flip enables); the remaining ten
+// fields are left as dead code -- ROM-observed constants documented in
+// modules/jt05415x/doc/register_map.md (KNOWN, k054157_regwrites_3600f.jsonl)
 wire unused_157 = &{ 1'b0, hofs_phase, clk_fanout, ram_clkph, ramout_mux,
-                     dbout_mux, vc_dir, crom_decode, db_lane, col_src0, col_src1,
-                     a_hofs_flip, b_hofs_flip, c_hofs_flip, d_hofs_flip };
+                     dbout_mux, vc_dir, crom_decode, db_lane, col_src0, col_src1 };
 `endif
 
 endmodule
