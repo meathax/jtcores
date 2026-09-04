@@ -17,9 +17,7 @@ module jtsimson_obj #(parameter
     // External object-RAM entry geometry, see jt053246_dma.v
     ESTRIDE_LOG2 = 3,
     ENTRY_LOG2   = 9,
-    parameter [9:0] HOFFSET   = 10'd62,
-    // forces mode8=0, see jt053246.sv
-    parameter       FORCE16   = 0
+    parameter [9:0] HOFFSET   = 10'd62
 )(
     input             rst,
     input             clk,
@@ -127,8 +125,7 @@ jt053246 #(
     .EDGE_TRIGGER    ( EDGE_TRIGGER     ),
     .ESTRIDE_LOG2    ( ESTRIDE_LOG2     ),
     .ENTRY_LOG2      ( ENTRY_LOG2       ),
-    .HOFFSET         ( HOFFSET          ),
-    .FORCE16         ( FORCE16          )
+    .HOFFSET         ( HOFFSET          )
 ) u_scan (    // sprite logic
     .rst        ( rst       ),
     .clk        ( clk       ),

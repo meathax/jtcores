@@ -1,5 +1,7 @@
 /* SPDX-FileCopyrightText: 2026 Jose Tejada Gomez
  * SPDX-License-Identifier: GPL-3.0-or-later
+ * Author: Rafael Eduardo Paiva Feener. Copyright: Jose Tejada Gomez
+ * Version: 1.0
  * Date: 17-6-2026 */
 
 module jtmoo_main(
@@ -23,7 +25,7 @@ module jtmoo_main(
     output reg           rom_cs,
     output reg           ram_cs,
     output reg           vram_cs,
-    output                oram_cs,  // object RAM CPU window, 0x190000-0x19FFFF
+    output               oram_cs,  // object RAM CPU window, 0x190000-0x19FFFF
     output reg           scr_cs,
 
     input         [15:0] oram_dout,
@@ -78,10 +80,10 @@ reg         cab_cs, HALTn, io_cs, obj_cs, none_cs,
 reg  [15:0] cpu_din, cab_dout, cur_ctrl2;
 reg  [ 7:0] io_dout;
 wire        eep_rdy, eep_do, bus_cs, bus_busy, BUSn;
-wire        dtac_mux, intdma;
+wire        intdma;
 wire [15:0] cpu_dout_68k, prot_dout, prot_din;
 wire [ 1:0] dsn_mx, prot_dsn;
-wire        prot_asn, prot_wrn, prot_irqn, prot_brn, prot_bgackn, BGn;
+wire        prot_asn, prot_wrn, prot_brn, prot_bgackn, BGn;
 
 // 053990 takes the bus for its DMA, same as jtriders_main
 assign a_mx     = prot_bgackn ? A            : prot_addr;
@@ -102,10 +104,8 @@ assign cpu_dout = prot_bgackn ? cpu_dout_68k : prot_din;
 assign oram_we  = ~ram_dsn & {2{~rw & oram_wr}};
 assign oram_cs  =  oram_wr & ~BUSn;
 assign prot_dout= cpu_din;
-assign prot_irqn= 1;
 
 assign st_dout  = { 1'b0, prot_bgackn, intdma, int1, dma_bsy, IPLn };
-assign dtac_mux = DTACKn;
 assign pair_we  = pair_cs && !RnW && !LDSn;
 
 always @* begin
@@ -153,13 +153,13 @@ always @* begin
             4'h5: k338_cs   = 1;     // REGCS
             4'h6: pcu_cs    = 1;     // PCUCS
             4'h7: prot_cs   = ~BUSn; // OBJ_REG_SEL
-            4'h8: cco_cs  = ~BUSn & ~dsn_mx[0]; // CCO, only DB0-7 connected
-            4'hA: sndon   = ~BUSn; // SDON
-            4'hB: pair_cs = ~BUSn; // PAIRCS
-            4'hC: vram_cs = ~BUSn; // BNKSCR
-            4'hD: cab_cs  = ~BUSn; // IOCS
-            4'hE: io_cs   = ~BUSn; // IOCSB
-            4'hF: reg_cs  = ~BUSn; // REG_WRITE
+            4'h8: cco_cs    = ~BUSn & ~dsn_mx[0]; // CCO, only DB0-7 connected
+            4'hA: sndon     = ~BUSn; // SDON
+            4'hB: pair_cs   = ~BUSn; // PAIRCS
+            4'hC: vram_cs   = ~BUSn; // BNKSCR
+            4'hD: cab_cs    = ~BUSn; // IOCS
+            4'hE: io_cs     = ~BUSn; // IOCSB
+            4'hF: reg_cs    = ~BUSn; // REG_WRITE
             default:;
         endcase
     end
@@ -184,8 +184,6 @@ always @(posedge clk) begin
         IPLn <= 3'b010;
     else if (int1)
         IPLn <= 3'b011;
-    else if (!prot_irqn)
-        IPLn <= 3'b100;
 
     HALTn   <= dip_pause & ~rst;
     cpu_din <= rom_cs  ? rom_data        :
@@ -240,7 +238,7 @@ jtriders_tmnt2 u_prot(
     .dsn        ( ram_dsn       ),
     .din        ( cpu_dout      ),
     .cpu_we     ( cpu_we        ),
-    .dtack_n    ( dtac_mux      ),
+    .dtack_n    ( DTACKn        ),
 
     // DMA
     .bus_asn    ( prot_asn      ),
@@ -324,7 +322,7 @@ jtframe_m68k u_cpu(
     .BGACKn     ( prot_bgackn ),
     .BGn        ( BGn         ),
 
-    .DTACKn     ( dtac_mux    ),
+    .DTACKn     ( DTACKn      ),
     .IPLn       ( IPLn        )
 );
 `else

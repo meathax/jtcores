@@ -1,5 +1,7 @@
 /* SPDX-FileCopyrightText: 2026 Jose Tejada Gomez
  * SPDX-License-Identifier: GPL-3.0-or-later
+ * Author: Rafael Eduardo Paiva Feener. Copyright: Jose Tejada Gomez
+ * Version: 1.0
  * Date: 17-6-2026 */
 
 module jtmoo_video(
@@ -45,7 +47,6 @@ module jtmoo_video(
     output            vdtac,
     input             tilesys_cs,
     input             rmrd_cs,  // graphics ROM read-back window
-    output            rst8,     // reset signal at 8th frame
 
     // control
     output            flip,
@@ -175,7 +176,6 @@ jtmoo_scroll u_scroll(
     .gfx_cs     ( tilesys_cs),
     .vram_cs    ( scr_cs    ),
     .rmrd_cs    ( rmrd_cs   ),
-    .rst8       ( rst8      ),
     .tile_dout  ( tilesys_dout ),
     .flip       ( flip      ),
 
@@ -213,13 +213,11 @@ jtmoo_scroll u_scroll(
     .st_dout    ( st_scr    )
 );
 
-/* verilator tracing_on */
 assign ommra = {cpu_addr[3:1],cpu_dsn[1]};
 assign orama = {cpu_addr[15:8], cpu_addr[5:1]}; // A6/A7 not connected
 
-localparam [9:0] OVOFFSET=0;
-
-jtsimson_obj #(.RAMW(13),.SHADOW(1),.ESTRIDE_LOG2(5),.ENTRY_LOG2(8),.FORCE16(1)) u_obj(
+/* verilator tracing_on */
+jtsimson_obj #(.RAMW(13),.SHADOW(1),.ESTRIDE_LOG2(5),.ENTRY_LOG2(8)) u_obj(
     .rst        ( rst       ),
     .clk        ( clk       ),
     .pxl_cen    ( pxl_cen   ),
@@ -227,7 +225,7 @@ jtsimson_obj #(.RAMW(13),.SHADOW(1),.ESTRIDE_LOG2(5),.ENTRY_LOG2(8),.FORCE16(1))
     .simson     ( 1'b0      ),
     .ln_done    (           ),
 
-    .voffset    ( OVOFFSET  ),
+    .voffset    ( 10'd0     ),
     // Base Video (inputs)
     .hs         ( hs        ),
     .lvbl       ( lvbl      ),
@@ -303,7 +301,7 @@ jtmoo_colmix u_colmix(
     .ioctl_addr ( ioctl_addr[11:0]),
     .ioctl_ram  ( ioctl_ram ),
     .ioctl_din  ( dump_pal  ),
-    .dump_mmr   ( pal_mmr   ),
+    .mmr_dump   ( pal_mmr   ),
 
     .debug_bus  ( debug_bus )
 );

@@ -19,7 +19,7 @@ module jt053246_dma(
     // External RAM
     output     [13:1] dma_addr, // up to 16 kB
     input      [15:0] dma_data,
-    output reg        dma_bsy,
+    output reg        dma_bsy,    
 
     output            dma_weh,
     output            dma_wel,
@@ -34,9 +34,7 @@ parameter K55673=0, K55673_DESC_SORT=0, EDGE_TRIGGER=0;
 parameter ESTRIDE_LOG2 = 3, ENTRY_LOG2 = 9;
 localparam GAPBITS   = ESTRIDE_LOG2>3 ? ESTRIDE_LOG2-3 : 0;
 localparam ENTRY_TOP = 3+ENTRY_LOG2; // top bit of the entry field inside cnt
-localparam PADBITS   = 13-ENTRY_LOG2-GAPBITS-3; // zero-fill so both arms of
-                                                 // the dma_addr mux below are
-                                                 // always the full 13 bits
+localparam PADBITS   = 13-ENTRY_LOG2-GAPBITS-3;
 
 wire        dma_we, hs_pos;
 reg  [ 1:0] lvbl_sh;
@@ -51,16 +49,11 @@ assign dma_weh = dma_we &  dma_wr_addr[1];
 
 assign dma_din     = dma_clr ? 16'h0 : dma_bufd;
 assign dma_we      = dma_clr | dma_ok;
-// The priority-sort LUT clear sweep always walks a flat 0..2047 index,
-// independent of the external entry geometry -- use the raw counter.
 assign dma_wr_addr = dma_clr ? cnt[11:1] : dma_bufa;
 assign hs_pos  = hs & ~hsl;
 
 assign dma_addr = GAPBITS==0 ? cnt[13:1] :
     { {PADBITS{1'b0}}, cnt[ENTRY_TOP:4], {GAPBITS{1'b0}}, cnt[3:1] };
-
-// for ENTRY_LOG2==9 this is the original &cnt[12:11] term
-wire entry_maxed = (ENTRY_LOG2==9) ? (&cnt[12:11]) : &cnt[ENTRY_TOP:4];
 
 assign sort_673 = dma_data[7:0]^{8{K55673_DESC_SORT[0]}};
 assign sort_24x ={ ~k44_en & dma_data[7], k44_en ? dma_data[6:0] : ~dma_data[6:0]};
@@ -116,14 +109,14 @@ always @(posedge clk) begin
             cnt      <= 0;
             dma_bufa <= 0;
             dma_ok   <= 0;
-        end else if( dma_clr ) begin // clear the priority-sort LUT
+        end else if( dma_clr ) begin // copy by priority order
             cnt[11:1] <= cnt[11:1] + 1'd1;
             dma_clr <= ~&{ cnt[11]|k44_en, cnt[10:1] };
             if( k44_en ) cnt[11]<=0;
             if( &cnt[11:1] && dma_wait ) cnt[11:1] <= 'h218; // extra 126us wait
         end else if(dma_wait) begin // extra time to match the original speed
             { dma_wait, cnt[11:1] } <= { 1'b1, cnt[11:1] } + 1'd1;
-        end else begin // copy by priority order
+        end else begin
             dma_bufd <= dma_data;
             if( k44_en ) cnt[13:11] <= 0;
             if( cnt[3:1]==0 ) begin
@@ -138,7 +131,7 @@ always @(posedge clk) begin
             dma_bufa[ 3:1] <= cnt[3:1];
             if( cnt[3:1]==6 ) begin
                 cnt[ENTRY_TOP:1] <= cnt[ENTRY_TOP:1] + 2; // skip 7
-                dma_bsy <= !(&cnt[10:2] && (k44_en || entry_maxed));
+                dma_bsy <= !(&cnt[10:2] && (k44_en || &cnt[ENTRY_TOP:4]));
             end
         end
     end

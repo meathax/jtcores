@@ -1,5 +1,7 @@
 /* SPDX-FileCopyrightText: 2026 Jose Tejada Gomez
  * SPDX-License-Identifier: GPL-3.0-or-later
+ * Author: Rafael Eduardo Paiva Feener. Copyright: Jose Tejada Gomez
+ * Version: 1.0
  * Date: 17-6-2026 */
 
 // K053251 priority mixer and K054338 colour combiner
@@ -42,7 +44,7 @@ module jtmoo_colmix(
     input      [11:0] ioctl_addr,
     input             ioctl_ram,
     output reg [ 7:0] ioctl_din,
-    output     [ 7:0] dump_mmr,
+    output     [ 7:0] mmr_dump,
 
     input      [ 7:0] debug_bus
 );
@@ -52,19 +54,18 @@ wire [15:0] k338_dout;
 wire [10:0] col, pal_addr, cpu_pal_addr;
 wire [ 8:0] ci0, ci1, ci2;
 wire [ 7:0] ci3, ci4, k251_dump, alpha_level, bri1_lvl,
-            pal_r, pal_g, pal_b, cpu_r, cpu_g, cpu_b, f_pal_r, f_pal_g, f_pal_b,
-            k338_byte;
+            pal_r, pal_g, pal_b, cpu_r, cpu_g, cpu_b, k338_byte;
 wire [ 5:0] pri0;
-wire [ 1:0] shd_out, shd_in, mcol_shd, k338_byte_sel;
+wire [ 1:0] shd_out, mcol_shd, k338_byte_sel;
 wire        pcu_we, reg_we, col_n, k338_video_en, clipsl, alpha_add, pblend0,
             brit, wr_r, wr_g, wr_b, pal_word, p0_opaque, mcol_blank, mcol_bri,
-            f_wr_r, f_wr_g, f_wr_b, k338_dump_sel;
+            k338_dump_sel;
 wire signed [9:0] shad_r, shad_g, shad_b;
 reg  [23:0] bgr;
 reg  [11:0] lyrf_l;
 reg  [ 7:0] r8, g8, b8, fr8, fg8, fb8;
 reg  [ 1:0] shd_l;
-reg         blank_l, fixop_a, blend_a, bri_l;
+reg         blank_l, fixop_a, blend_a, bri_l, ph, ph_l;
 
 // palette is xRGB_888, big endian: even word = R, odd word = {G,B}
 assign pal_word     = cpu_addr[1];
@@ -82,10 +83,9 @@ assign {blue,green,red} = (lvbl & lhbl) ? bgr : 24'd0;
 assign pri0      = { lyro_pri, 1'b1 };
 assign ci0       = lyro_pxl;
 assign ci1       = 9'd0;
-assign ci2       = { lyra_pxl[8], lyra_pxl[7:4], lyra_pxl[3:0] };
+assign ci2       = lyra_pxl[8:0];
 assign ci3       = { 1'b0, lyrb_pxl[7:5], lyrb_pxl[3:0] }; // only CI30..CI36 wired
-assign ci4       = { lyrc_pxl[7:4], lyrc_pxl[3:0] };
-assign shd_in    = shadow;
+assign ci4       = lyrc_pxl[7:0];
 
 // MIX0 = COL8 & ~COL9 & ~COL10, MIX1 tied low
 assign pblend0    = col[8] & ~col[9] & ~col[10];
@@ -94,19 +94,16 @@ assign p0_opaque  = |lyrf_l[3:0];
 assign mcol_blank = p0_opaque ? 1'b0 : col_n;
 assign mcol_shd   = p0_opaque ? 2'b0 : shd_out;
 assign mcol_bri   = p0_opaque ? 1'b0 : brit;
-assign pal_addr   = col;
-
-// plane 0 palette mirror, bank 0x700-0x7FF
-assign f_wr_r = wr_r & (cpu_pal_addr[10:8]==3'b111);
-assign f_wr_g = wr_g & (cpu_pal_addr[10:8]==3'b111);
-assign f_wr_b = wr_b & (cpu_pal_addr[10:8]==3'b111);
+// plane 0 reads the palette on the odd clock cycles, bank 0x700-0x7FF
+assign pal_addr   = ioctl_ram ? {1'b0,ioctl_addr[11:2]} :
+                    ph        ? {3'b111,lyrf_l[7:0]}    : col;
 
 // K054338 dump: CONTROL/brightness/PBLEND on ioctl_addr[4] or debug_bus[7]
 assign k338_dump_sel = ioctl_ram ? ioctl_addr[4]   : debug_bus[7];
 assign k338_byte_sel = ioctl_ram ? ioctl_addr[1:0] : debug_bus[1:0];
 assign k338_byte     = k338_byte_sel==2'd0 ? k338_dump[23:16] :
                        k338_byte_sel==2'd1 ? k338_dump[15:8]  : k338_dump[7:0];
-assign dump_mmr      = k338_dump_sel ? k338_byte : k251_dump;
+assign mmr_dump      = k338_dump_sel ? k338_byte : k251_dump;
 
 // CLIPSL disables the clamp, the sum wraps instead
 function [7:0] add_clip(input [7:0] cin, input signed [9:0] delta, input noclip);
@@ -122,27 +119,17 @@ endfunction
 // mode 0: (front*level + back*(256-level))>>8
 // mode 1: front + (back*(32-mixlv))>>5, mixlv is the top 5 bits of level
 function [7:0] mix_blend(input [7:0] front, input [7:0] back, input [7:0] level, input additive);
-    reg [ 8:0] inv9;
+    reg [ 8:0] inv9, asum;
     reg [ 5:0] inv5;
     reg [17:0] sum;
     reg [13:0] aprod;
-    reg [ 8:0] asum;
 begin
-    inv9 = 9'd256 - {1'b0,level};
-    // defaults only satisfy Quartus all-paths-assigned check (10776)
-    inv5  = 6'd0;
-    sum   = 18'd0;
-    aprod = 14'd0;
-    asum  = 9'd0;
-    if( additive ) begin
-        inv5  = 6'd32 - {1'b0,level[7:3]};
-        aprod = back * inv5;
-        asum  = {1'b0,front} + aprod[13:5];
-        mix_blend = asum[8] ? 8'hff : asum[7:0];
-    end else begin
-        sum = front*level + back*inv9; // <= 65280, no clamp needed
-        mix_blend = sum[15:8];
-    end
+    inv9  = 9'd256 - {1'b0,level};
+    inv5  = 6'd32 - {1'b0,level[7:3]};
+    sum   = front*level + back*inv9; // <= 65280, no clamp needed
+    aprod = back * inv5;
+    asum  = {1'b0,front} + aprod[13:5];
+    mix_blend = !additive ? sum[15:8] : asum[8] ? 8'hff : asum[7:0];
 end
 endfunction
 
@@ -173,9 +160,15 @@ always @(posedge clk, posedge rst) begin
         lyrf_l  <= 0;
         {r8,g8,b8}    <= 0;
         {fr8,fg8,fb8} <= 0;
+        ph      <= 0;
+        ph_l    <= 0;
     end else begin
-        { r8,  g8,  b8  } <= { pal_r,   pal_g,   pal_b   };
-        { fr8, fg8, fb8 } <= { f_pal_r, f_pal_g, f_pal_b };
+        ph   <= ~ph & ~pxl_cen;
+        ph_l <= ph;
+        if( ph_l )
+            { fr8, fg8, fb8 } <= { pal_r, pal_g, pal_b };
+        else
+            { r8,  g8,  b8  } <= { pal_r, pal_g, pal_b };
         if( pxl_cen ) begin
             lyrf_l  <= lyrf_pxl;
             shd_l   <= mcol_shd;
@@ -259,7 +252,7 @@ jtcolmix_053251 u_k251(
     .ci3        ( ci3       ),
     .ci4        ( ci4       ),
     // shadow
-    .shd_in     ( shd_in    ),
+    .shd_in     ( shadow    ),
     .shd_out    ( shd_out   ),
     // dump to SD card
     .ioctl_addr ( ioctl_ram ? ioctl_addr[3:0] : debug_bus[3:0] ),
@@ -278,7 +271,7 @@ jtframe_dual_ram #(.AW(11),.SIMFILE("pal_g.bin")) u_pal_g(
     .q0     ( cpu_g         ),
     .clk1   ( clk           ),
     .data1  ( 8'd0          ),
-    .addr1  ( ioctl_ram ? {1'b0,ioctl_addr[11:2]} : pal_addr ),
+    .addr1  ( pal_addr      ),
     .we1    ( 1'b0          ),
     .q1     ( pal_g         )
 );
@@ -291,7 +284,7 @@ jtframe_dual_ram #(.AW(11),.SIMFILE("pal_r.bin")) u_pal_r(
     .q0     ( cpu_r         ),
     .clk1   ( clk           ),
     .data1  ( 8'd0          ),
-    .addr1  ( ioctl_ram ? {1'b0,ioctl_addr[11:2]} : pal_addr ),
+    .addr1  ( pal_addr      ),
     .we1    ( 1'b0          ),
     .q1     ( pal_r         )
 );
@@ -304,49 +297,9 @@ jtframe_dual_ram #(.AW(11),.SIMFILE("pal_b.bin")) u_pal_b(
     .q0     ( cpu_b         ),
     .clk1   ( clk           ),
     .data1  ( 8'd0          ),
-    .addr1  ( ioctl_ram ? {1'b0,ioctl_addr[11:2]} : pal_addr ),
+    .addr1  ( pal_addr      ),
     .we1    ( 1'b0          ),
     .q1     ( pal_b         )
-);
-
-// plane 0 palette mirror
-jtframe_dual_ram #(.AW(8)) u_fpal_g(
-    .clk0   ( clk               ),
-    .data0  ( cpu_dout[15:8]    ),
-    .addr0  ( cpu_pal_addr[7:0] ),
-    .we0    ( f_wr_g            ),
-    .q0     (                   ),
-    .clk1   ( clk               ),
-    .data1  ( 8'd0              ),
-    .addr1  ( lyrf_l[7:0]       ),
-    .we1    ( 1'b0              ),
-    .q1     ( f_pal_g           )
-);
-
-jtframe_dual_ram #(.AW(8)) u_fpal_r(
-    .clk0   ( clk               ),
-    .data0  ( cpu_dout[7:0]     ),
-    .addr0  ( cpu_pal_addr[7:0] ),
-    .we0    ( f_wr_r            ),
-    .q0     (                   ),
-    .clk1   ( clk               ),
-    .data1  ( 8'd0              ),
-    .addr1  ( lyrf_l[7:0]       ),
-    .we1    ( 1'b0              ),
-    .q1     ( f_pal_r           )
-);
-
-jtframe_dual_ram #(.AW(8)) u_fpal_b(
-    .clk0   ( clk               ),
-    .data0  ( cpu_dout[7:0]     ),
-    .addr0  ( cpu_pal_addr[7:0] ),
-    .we0    ( f_wr_b            ),
-    .q0     (                   ),
-    .clk1   ( clk               ),
-    .data1  ( 8'd0              ),
-    .addr1  ( lyrf_l[7:0]       ),
-    .we1    ( 1'b0              ),
-    .q1     ( f_pal_b           )
 );
 
 `ifdef SIMULATION

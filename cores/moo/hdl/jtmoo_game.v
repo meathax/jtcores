@@ -1,5 +1,7 @@
 /* SPDX-FileCopyrightText: 2026 Jose Tejada Gomez
  * SPDX-License-Identifier: GPL-3.0-or-later
+ * Author: Rafael Eduardo Paiva Feener. Copyright: Jose Tejada Gomez
+ * Version: 1.0
  * Date: 17-6-2026 */
 
 module jtmoo_game(
@@ -7,9 +9,9 @@ module jtmoo_game(
 );
 
 /* verilator tracing_off */
-wire        snd_irq, rmrd_cs, rst8, rst_snd, dma_bsy,
+wire        snd_irq, rmrd_cs, dma_bsy,
             pal_cs, cpu_we, tilesys_cs, objsys_cs, pcu_cs, k338_cs, objcha_n,
-            vdtac, flip,
+            vdtac,
             objreg_cs, scrreg_cs, scr_cs, pair_we, cco_cs, rw, int1;
 wire [ 1:0] oram_we;
 wire [ 7:0] vtimer_mmr;
@@ -21,11 +23,9 @@ wire [ 7:0] pair_dout, st_main, st_video, st_snd;
 wire [ 3:0] vtimer_addr;
 
 assign debug_view = debug_mux;
-assign dip_flip   = flip;
 assign ram_addr   = main_addr[15:1];
 assign video_dumpa= ioctl_addr[15:0]-16'h80;
 assign vtimer_addr= main_addr[4:1];
-assign rst_snd    = rst;
 
 always @(posedge clk) begin
     debug_mux <= st_snd;
@@ -103,7 +103,6 @@ jtmoo_main u_main(
 /* verilator tracing_on */
 jtmoo_video u_video (
     .rst            ( rst           ),
-    .rst8           ( rst8          ),
     .clk            ( clk           ),
     .pxl_cen        ( pxl_cen       ),
     .pxl2_cen       ( pxl2_cen      ),
@@ -112,7 +111,7 @@ jtmoo_video u_video (
     .lvbl           ( LVBL          ),
     .hs             ( HS            ),
     .vs             ( VS            ),
-    .flip           ( flip          ),
+    .flip           ( dip_flip      ),
     // GFX - CPU interface
     .cpu_we         ( cpu_we        ),
     .cpu_addr       (main_addr[16:1]),
@@ -179,7 +178,7 @@ jtmoo_video u_video (
 
 /* verilator tracing_on */
 jtmoo_sound u_sound(
-    .rst            ( rst_snd       ),
+    .rst            ( rst           ),
     .clk            ( clk           ),
     .cen_8          ( cen_8         ),
     .cen_4          ( cen_4         ),
@@ -203,8 +202,8 @@ jtmoo_sound u_sound(
     .pcm_data       ( pcm_data      ),
     .pcm_cs         ( pcm_cs        ),
     // Sound output
-    .snd_l          ( k539_l        ),
-    .snd_r          ( k539_r        ),
+    .k539_l         ( k539_l        ),
+    .k539_r         ( k539_r        ),
     // Debug
     .debug_bus      ( debug_bus     ),
     .st_dout        ( st_snd        )

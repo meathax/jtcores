@@ -185,9 +185,7 @@ jt054157_mmr #(
     .st_dout     ( st_157_dout    )
 );
 
-///////////////////////////////////////////////////////////////////////
 // Tile RAM
-///////////////////////////////////////////////////////////////////////
 wire [12:0] vaddr, cpu_vaddr;
 wire [ 7:0] cpu_ram0, cpu_ram1, cpu_ram2;
 wire        cpu_attr, cpu_wr;
@@ -259,9 +257,7 @@ jtframe_dual_nvram #(
     .q1     ( vram2_scan      )
 );
 
-///////////////////////////////////////////////////////////////////////
 // Per-layer effective coordinates
-///////////////////////////////////////////////////////////////////////
 // The map is a whole number of 512x256 pages, global flip inverts the low bits
 reg  [11:0] lyrf_lnscr, lyra_lnscr, lyrb_lnscr, lyrc_lnscr;
 wire [12:0] hflip_corr_ext;
@@ -270,22 +266,18 @@ wire [11:0] vflip_corr_ext;
 assign hflip_corr_ext = { hflip_corr[11], hflip_corr };
 assign vflip_corr_ext = { vflip_corr[10], vflip_corr };
 
-function [11:0] eff_scrx( input [1:0] mode, input [11:0] lnscr, input [11:0] scrx );
-    eff_scrx = mode[0]==1'b0 ? lnscr : scrx;
-endfunction
-
 wire [12:0] f_xsum, a_xsum, b_xsum, c_xsum;
 wire [11:0] f_ysum, a_ysum, b_ysum, c_ysum;
 wire [ 8:0] f_heff, a_heff, b_heff, c_heff;
 wire [ 8:0] f_veff, a_veff, b_veff, c_veff;
 
-assign f_xsum = {4'd0,hdump} + HOFSA + {1'b0,eff_scrx(lnscr_ctrl[1:0],lyrf_lnscr,a_scrx)} +
+assign f_xsum = {4'd0,hdump} + HOFSA + {1'b0,lnscr_ctrl[0] ? a_scrx : lyrf_lnscr} +
                 (glob_ctrl[4] ? hflip_corr_ext : 13'd0);
-assign a_xsum = {4'd0,hdump} + HOFSB + {1'b0,eff_scrx(lnscr_ctrl[3:2],lyra_lnscr,b_scrx)} +
+assign a_xsum = {4'd0,hdump} + HOFSB + {1'b0,lnscr_ctrl[2] ? b_scrx : lyra_lnscr} +
                 (glob_ctrl[4] ? hflip_corr_ext : 13'd0);
-assign b_xsum = {4'd0,hdump} + HOFSC + {1'b0,eff_scrx(lnscr_ctrl[5:4],lyrb_lnscr,c_scrx)} +
+assign b_xsum = {4'd0,hdump} + HOFSC + {1'b0,lnscr_ctrl[4] ? c_scrx : lyrb_lnscr} +
                 (glob_ctrl[4] ? hflip_corr_ext : 13'd0);
-assign c_xsum = {4'd0,hdump} + HOFSD + {1'b0,eff_scrx(lnscr_ctrl[7:6],lyrc_lnscr,d_scrx)} +
+assign c_xsum = {4'd0,hdump} + HOFSD + {1'b0,lnscr_ctrl[6] ? d_scrx : lyrc_lnscr} +
                 (glob_ctrl[4] ? hflip_corr_ext : 13'd0);
 
 assign f_ysum = {3'd0,vdump} + {1'b0,a_scry} + (glob_ctrl[5] ? vflip_corr_ext : 12'd0);
@@ -303,9 +295,7 @@ assign a_veff = { 1'b0, glob_ctrl[5] ? ~a_ysum[7:0] : a_ysum[7:0] };
 assign b_veff = { 1'b0, glob_ctrl[5] ? ~b_ysum[7:0] : b_ysum[7:0] };
 assign c_veff = { 1'b0, glob_ctrl[5] ? ~c_ysum[7:0] : c_ysum[7:0] };
 
-///////////////////////////////////////////////////////////////////////
 // VRAM scan slots
-///////////////////////////////////////////////////////////////////////
 wire [ 5:0] layer_vgrid, layer_hgrid;
 wire [11:0] layer_scrx_e;
 wire [ 1:0] layer_scroll, layer_x, layer_y, layer_w, layer_h;
@@ -339,14 +329,10 @@ assign x_sum        = (slot_lyr==2'd0 ? f_xsum : slot_lyr==2'd1 ? a_xsum :
 assign y_sum        =  slot_lyr==2'd0 ? f_ysum : slot_lyr==2'd1 ? a_ysum :
                        slot_lyr==2'd2 ? b_ysum : c_ysum;
 
-assign a_x = a_hgrid[4:3]; assign b_x = b_hgrid[4:3];
-assign c_x = c_hgrid[4:3]; assign d_x = d_hgrid[4:3];
-assign a_y = a_vgrid[4:3]; assign b_y = b_vgrid[4:3];
-assign c_y = c_vgrid[4:3]; assign d_y = d_vgrid[4:3];
-assign a_w = a_hgrid[1:0]; assign b_w = b_hgrid[1:0];
-assign c_w = c_hgrid[1:0]; assign d_w = d_hgrid[1:0];
-assign a_h = a_vgrid[1:0]; assign b_h = b_vgrid[1:0];
-assign c_h = c_vgrid[1:0]; assign d_h = d_vgrid[1:0];
+assign a_x = a_hgrid[4:3], b_x = b_hgrid[4:3], c_x = c_hgrid[4:3], d_x = d_hgrid[4:3],
+       a_y = a_vgrid[4:3], b_y = b_vgrid[4:3], c_y = c_vgrid[4:3], d_y = d_vgrid[4:3],
+       a_w = a_hgrid[1:0], b_w = b_hgrid[1:0], c_w = c_hgrid[1:0], d_w = d_hgrid[1:0],
+       a_h = a_vgrid[1:0], b_h = b_vgrid[1:0], c_h = c_vgrid[1:0], d_h = d_vgrid[1:0];
 
 assign layer_x      = layer_hgrid[4:3];
 assign layer_y      = layer_vgrid[4:3];
@@ -393,9 +379,7 @@ always @* begin
     x_nx = glob_ctrl[4] ? layer_width - 13'd1 - x_mod : x_mod;
 end
 
-///////////////////////////////////////////////////////////////////////
 // Tile attribute decode - see MAME k056832_device::get_tile_info
-///////////////////////////////////////////////////////////////////////
 reg  [ 2:0] slot_l;
 wire [ 1:0] fbits, attr_flip, flip_msk;
 reg  [ 5:0] tcolor;
@@ -468,9 +452,7 @@ always @(posedge clk) begin
     end
 end
 
-///////////////////////////////////////////////////////////////////////
 // Pixel pipelines
-///////////////////////////////////////////////////////////////////////
 wire [18:0] f_rom_addr, a_rom_addr, b_rom_addr, c_rom_addr;
 wire        f_rom_cs, a_rom_cs, b_rom_cs, c_rom_cs;
 
@@ -503,9 +485,7 @@ jt054157 u_054157(
     .gfx_en( gfx_en )
 );
 
-///////////////////////////////////////////////////////////////////////
 // Graphics ROM read-back window
-///////////////////////////////////////////////////////////////////////
 // MAME: addr = 0x2000*bank + 2*offset. The read-back steals the first pipeline while active
 assign lyrf_addr = rmrd_cs ? { rom_bank, cpu_addr[12:2] } : f_rom_addr;
 assign lyrf_cs   = rmrd_cs | f_rom_cs;
@@ -519,14 +499,6 @@ assign romrd_dout= cpu_addr[1] ? { lyrf_data[23:16], lyrf_data[31:24] } :
                                  { lyrf_data[ 7: 0], lyrf_data[15: 8] };
 
 `ifdef SIMULATION
-wire unsupported_vram_timing = |{ glob_ctrl[7], glob_ctrl[1:0] };
-reg unsupported_vram_timing_l;
-always @(posedge clk) begin
-    unsupported_vram_timing_l <= unsupported_vram_timing;
-    if( unsupported_vram_timing && !unsupported_vram_timing_l )
-        $display("WARNING (jt05415x): glob_ctrl bits 7/1/0 not modelled (%b)",
-                 glob_ctrl);
-end
 wire unused_156 = &{ 1'b0, attr_ctrl, addr_ctrl, vram_ctrl, rom_col, rom_vrc,
                      tile_lut, cpu_bank[5:4], cpu_bank[2:1], lnscr_bank[5:1] };
 wire unused_157 = &{ 1'b0, hofs_phase, clk_fanout, ram_clkph, ramout_mux,

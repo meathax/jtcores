@@ -1,6 +1,5 @@
 /* SPDX-FileCopyrightText: 2026 Jose Tejada Gomez
  * SPDX-License-Identifier: GPL-3.0-or-later
- * Version: 1.0
  * Date: 2-9-2026 */
 
 // K054157 scroll layer data combiner: four pixel pipelines (ACOL..DCOL) with HOFSA..HOFSD phases

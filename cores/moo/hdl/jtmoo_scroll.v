@@ -25,13 +25,12 @@ module jtmoo_scroll(
     input      [ 1:0] cpu_dsn,
     input      [15:0] cpu_dout,
     output     [15:0] tile_dout,
-    output reg        rst8,
 
     // control
     output            flip,
 
     // Tile ROMs
-    output     [18:0] lyrf_addr, lyra_addr, lyrb_addr, lyrc_addr,
+    output     [20:2] lyrf_addr, lyra_addr, lyrb_addr, lyrc_addr,
     output            lyrf_cs,   lyra_cs,   lyrb_cs,   lyrc_cs,
     input      [31:0] lyrf_data, lyra_data, lyrb_data, lyrc_data,
     input             lyrf_ok,   lyra_ok,   lyrb_ok,   lyrc_ok,
@@ -50,7 +49,6 @@ module jtmoo_scroll(
     output     [ 7:0] st_dout
 );
 
-reg  [2:0] frame_cnt;
 wire [7:0] st_156, st_157;
 wire       rnw, blankn;
 
@@ -113,19 +111,11 @@ jt05415x u_05415x(
 
 always @(posedge clk, posedge rst) begin
     if( rst ) begin
-        hdump     <= 0;
-        vdump     <= 0;
-        frame_cnt <= 0;
-        rst8      <= 0;
+        hdump <= 0;
+        vdump <= 0;
     end else if( pxl_cen ) begin
         hdump <= hs ? 9'd0 : hdump + 9'd1;
-        if( hs ) begin
-            vdump <= vs ? 9'd0 : vdump + 9'd1;
-            if( vs ) begin
-                frame_cnt <= frame_cnt + 3'd1;
-                rst8      <= &frame_cnt;
-            end
-        end
+        if( hs ) vdump <= vs ? 9'd0 : vdump + 9'd1;
     end
 end
 

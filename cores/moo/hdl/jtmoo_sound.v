@@ -12,22 +12,22 @@ module jtmoo_sound(
 
     input           pair_we,
     // communication with main CPU
-    input   [ 7:0]  main_dout,
-    output  [ 7:0]  pair_dout,
-    input   [ 4:1]  main_addr,
+    input    [ 7:0] main_dout,
+    output   [ 7:0] pair_dout,
+    input    [ 4:1] main_addr,
 
     input           snd_irq,
     // ROM
-    output  [17:0]  rom_addr,
-    output  reg     rom_cs,
-    input   [ 7:0]  rom_data,
+    output   [17:0] rom_addr,
+    output reg      rom_cs,
+    input    [ 7:0] rom_data,
     input           rom_ok,
     // PCM ROM
-    output  [20:0]  pcm_addr,
-    input   [ 7:0]  pcm_data,
+    output   [20:0] pcm_addr,
+    input    [ 7:0] pcm_data,
     output          pcm_cs,
     // Sound output
-    output     signed [15:0] snd_l, snd_r,
+    output signed [15:0] k539_l, k539_r,
     // Debug
     input    [ 7:0] debug_bus,
     output   [ 7:0] st_dout
@@ -41,7 +41,7 @@ wire [15:0] A;
 wire        m1_n, mreq_n, rd_n, wr_n, iorq_n, rfsh_n, nmi_n,
             cpu_cen, fm_intn, latch_we, int_n, bank_we_fall;
 reg         ram_cs, fm_cs, k39_cs, k21_cs, bank_we, mem_acc, nmi_clr, bank_we_l;
-wire signed [15:0] fm_l, fm_r, k539_l, k539_r;
+wire signed [15:0] fm_l, fm_r;
 wire [ 2:0] nc;
 
 assign latch_we = k21_cs && !wr_n;
@@ -164,7 +164,7 @@ jt539 #(.VOLSHIFT(1)) u_k54539(
     .st_dout    ( st_dout   )
 );
 
-jt054321 #(.AUDIO(1)) u_54321(
+jt054321 u_54321(
     .rst        ( rst       ),
     .clk        ( clk       ),
     .maddr      ( main_addr ),
@@ -180,12 +180,7 @@ jt054321 #(.AUDIO(1)) u_54321(
     // Z80 bus control
     .snd_on     ( snd_irq   ),
     .siorq_n    ( iorq_n    ),
-    .int_n      ( int_n     ),
-    // global volume
-    .snd_l      ( k539_l    ),
-    .snd_r      ( k539_r    ),
-    .out_l      ( snd_l     ),
-    .out_r      ( snd_r     )
+    .int_n      ( int_n     )
 );
 `else
 initial rom_cs   = 0;
@@ -193,6 +188,6 @@ assign  rom_addr = 0;
 assign  pcm_addr = 0;
 assign  pcm_cs   = 0;
 assign  st_dout  = 0;
-assign  { pair_dout, snd_l, snd_r } = 0;
+assign  { pair_dout, k539_l, k539_r } = 0;
 `endif
 endmodule
