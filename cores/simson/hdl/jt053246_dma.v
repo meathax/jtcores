@@ -29,19 +29,8 @@ module jt053246_dma(
 );
 
 parameter K55673=0, K55673_DESC_SORT=0, EDGE_TRIGGER=0;
-// External-RAM entry geometry. Every board still copies 8 real words
-// (indices 0-6, index 7 is always skipped) per sprite entry, but the
-// physical stride between entries in the CPU-visible object RAM differs
-// by board: Simpsons/X-Men/rungun/053244-5-based boards (the default)
-// pack entries every 8 words (512 entries max). Moo Mesa/Bucky O'Hare's
-// board packs entries every 32 words, 256 entries in an 8 kW RAM -- real
-// schematic wiring is {EN7..EN0,EA5..EA1} = {MAIN_A15..A8,MAIN_A5..A1},
-// with A6/A7 not connected to the RAM at all (aliased). ESTRIDE_LOG2 is
-// log2(external words per entry); ENTRY_LOG2 is log2(max entries), used
-// only to size the non-k44 termination check. Changing these two together
-// changes what dma_addr (the address exposed to the external RAM) means.
-// dma_wr_addr (the internal priority-sort LUT) stays at 2048 slots. The
-// k44_en=1 path (053244/5) keeps the default values below.
+// ESTRIDE_LOG2: log2 of external words per entry, ENTRY_LOG2: log2 of entries
+// Default 8 words/512 entries. Moo Mesa: 32 words (A6/A7 not connected), 256 entries
 parameter ESTRIDE_LOG2 = 3, ENTRY_LOG2 = 9;
 localparam GAPBITS   = ESTRIDE_LOG2>3 ? ESTRIDE_LOG2-3 : 0;
 localparam ENTRY_TOP = 3+ENTRY_LOG2; // top bit of the entry field inside cnt
@@ -55,10 +44,6 @@ reg  [11:1] dma_bufa;
 reg  [15:0] dma_bufd;
 wire [ 7:0] sort_24x, sort_673;
 reg         dma_clr, dma_wait, dma_ok, dma_44, hsl;
-// Internal linear counter: word index is always cnt[3:1] (3 bits, 0-7,
-// index 7 skipped); the entry number is cnt[ENTRY_TOP:4] (ENTRY_LOG2
-// bits). This is exactly what `dma_addr` used to be, renamed so the
-// external address (below) can insert the real board's stride gap.
 reg  [13:1] cnt;
 
 assign dma_wel = dma_we & ~dma_wr_addr[1];
@@ -71,17 +56,10 @@ assign dma_we      = dma_clr | dma_ok;
 assign dma_wr_addr = dma_clr ? cnt[11:1] : dma_bufa;
 assign hs_pos  = hs & ~hsl;
 
-// External RAM address: identity when GAPBITS==0 (every core except Moo
-// Mesa/Bucky O'Hare today), otherwise insert GAPBITS zero bits between
-// the word index and the entry number.
 assign dma_addr = GAPBITS==0 ? cnt[13:1] :
     { {PADBITS{1'b0}}, cnt[ENTRY_TOP:4], {GAPBITS{1'b0}}, cnt[3:1] };
 
-// Non-k44 DMA termination, checked (combined with cnt[10:2] below) at the
-// word==6 boundary. For ENTRY_LOG2==9 (every existing core) this is byte-
-// identical to the original hardcoded `&cnt[12:11]` term. For a narrower
-// entry field (Moo Mesa, ENTRY_LOG2==8) it generalises to "the whole
-// entry field is at its max value".
+// for ENTRY_LOG2==9 this is the original &cnt[12:11] term
 wire entry_maxed = (ENTRY_LOG2==9) ? (&cnt[12:11]) : &cnt[ENTRY_TOP:4];
 
 assign sort_673 = dma_data[7:0]^{8{K55673_DESC_SORT[0]}};

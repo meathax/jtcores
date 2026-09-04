@@ -1,38 +1,9 @@
 /* SPDX-FileCopyrightText: 2026 Jose Tejada Gomez
- * SPDX-License-Identifier: GPL-3.0-or-later */
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Date: 2-9-2026 */
 
-// K054156 + K054157 scroll pair
-//
-// The K054156 owns the CPU registers, the tile RAM and every address that
-// reaches it: page grid, X/Y scroll, line/row scroll and the graphics ROM
-// address, including the CPU read-back window. The K054157 turns the tile
-// stream into four pixel pipelines and lives in jt054157.v.
-//
-// Evidence used here
-//   - furrtek's silicon RE of both dies (converted sources under doc/)
-//   - MAME doc/mame/k054156_k054157_k056832.cpp for the software contract
-//   - Moo Mesa PWB353126 schematics: three 8 kB byte-wide tile RAMs
-//     (SCRAMA0..12, VD0..23) and a 19-bit graphics ROM address
-//
-// Tile RAM layout, taken from the board rather than from MAME's word array:
-//   RAM0 = attribute byte     (CPU even word, D[7:0])
-//   RAM1 = tile code high     (CPU odd word,  D[15:8])
-//   RAM2 = tile code low      (CPU odd word,  D[7:0])
-// One page is 64x32 tiles, so the 8192 entries hold four pages.
-//
-// Physical chip mapping (do not assume alphabetical/positional order):
-// u_vram0 (RAM0, attribute) is the always-selected standalone plane, which
-// on the Moo Mesa board is chip M10 (VD16-23, ~CS1 tied to VSS); u_vram1
-// and u_vram2 (RAM1/RAM2, the 16-bit tile-code pair) are the independently
-// byte-enabled chips L10 (VD0-7, ~RCS1) and N10 (VD8-15, ~RCS2). u_vram0
-// is *not* L10 -- matters only for matching an ioctl RAM dump or a MAME
-// k056832 videoram dump byte-for-byte against a specific physical chip;
-// functionally irrelevant since all three are private to this module.
-//
-// Scan cadence: every 8-pixel group has eight slots. The first four fetch one
-// tile per layer, the last four refresh each layer's line/row scroll word.
-// Line scroll is source oriented and only depends on the vertical position,
-// so it is stable well before the active area starts.
+// K054156: CPU registers, tile RAM and addressing. K054157: pixel pipelines, see jt054157.v
+// Tile RAM: RAM0 attribute (even word D[7:0]), RAM1/RAM2 tile code (odd word). Four 64x32 pages
 
 module jt05415x(
     input             rst,
@@ -78,15 +49,7 @@ module jt05415x(
 parameter SIMFILE156 = "rest.bin",
           SIMFILE157 = "rest.bin";
 
-// Per-layer horizontal offsets. MAME applies them with set_layer_offs and the
-// same values serve Moo Mesa and Bucky O'Hare, so they belong to the K054157
-// HOFSA..HOFSD phases rather than to the game.
-// NOTE (B2, see doc/register_map.md): the 054157 register file's
-// a..d_hofs_flip bits (mmr[0x02] bits 0/2/4/6) are NOT a sign/polarity
-// selector for these constants -- an earlier hypothesis, superseded by the
-// Furrtek 054157 README, which documents that exact register/bit group as
-// "Enable tile X flips" (per layer). They are wired below as a gate on each
-// layer's per-tile horizontal-flip attribute instead.
+// Per-layer horizontal offsets, same values for Moo Mesa and Bucky O'Hare (MAME set_layer_offs)
 localparam signed [12:0] HOFSA = -13'sd2,
                          HOFSB =  13'sd2,
                          HOFSC =  13'sd4,
@@ -299,9 +262,7 @@ jtframe_dual_nvram #(
 ///////////////////////////////////////////////////////////////////////
 // Per-layer effective coordinates
 ///////////////////////////////////////////////////////////////////////
-// The map is always a whole number of 512x256 pages, so the wrap never
-// touches the low nine horizontal or low eight vertical bits. Global flip
-// inverts them because width-1 and height-1 have those bits all set.
+// The map is a whole number of 512x256 pages, global flip inverts the low bits
 reg  [11:0] lyrf_lnscr, lyra_lnscr, lyrb_lnscr, lyrc_lnscr;
 wire [12:0] hflip_corr_ext;
 wire [11:0] vflip_corr_ext;
@@ -318,10 +279,14 @@ wire [11:0] f_ysum, a_ysum, b_ysum, c_ysum;
 wire [ 8:0] f_heff, a_heff, b_heff, c_heff;
 wire [ 8:0] f_veff, a_veff, b_veff, c_veff;
 
-assign f_xsum = {4'd0,hdump} + HOFSA + {1'b0,eff_scrx(lnscr_ctrl[1:0],lyrf_lnscr,a_scrx)} + (glob_ctrl[4] ? hflip_corr_ext : 13'd0);
-assign a_xsum = {4'd0,hdump} + HOFSB + {1'b0,eff_scrx(lnscr_ctrl[3:2],lyra_lnscr,b_scrx)} + (glob_ctrl[4] ? hflip_corr_ext : 13'd0);
-assign b_xsum = {4'd0,hdump} + HOFSC + {1'b0,eff_scrx(lnscr_ctrl[5:4],lyrb_lnscr,c_scrx)} + (glob_ctrl[4] ? hflip_corr_ext : 13'd0);
-assign c_xsum = {4'd0,hdump} + HOFSD + {1'b0,eff_scrx(lnscr_ctrl[7:6],lyrc_lnscr,d_scrx)} + (glob_ctrl[4] ? hflip_corr_ext : 13'd0);
+assign f_xsum = {4'd0,hdump} + HOFSA + {1'b0,eff_scrx(lnscr_ctrl[1:0],lyrf_lnscr,a_scrx)} +
+                (glob_ctrl[4] ? hflip_corr_ext : 13'd0);
+assign a_xsum = {4'd0,hdump} + HOFSB + {1'b0,eff_scrx(lnscr_ctrl[3:2],lyra_lnscr,b_scrx)} +
+                (glob_ctrl[4] ? hflip_corr_ext : 13'd0);
+assign b_xsum = {4'd0,hdump} + HOFSC + {1'b0,eff_scrx(lnscr_ctrl[5:4],lyrb_lnscr,c_scrx)} +
+                (glob_ctrl[4] ? hflip_corr_ext : 13'd0);
+assign c_xsum = {4'd0,hdump} + HOFSD + {1'b0,eff_scrx(lnscr_ctrl[7:6],lyrc_lnscr,d_scrx)} +
+                (glob_ctrl[4] ? hflip_corr_ext : 13'd0);
 
 assign f_ysum = {3'd0,vdump} + {1'b0,a_scry} + (glob_ctrl[5] ? vflip_corr_ext : 12'd0);
 assign a_ysum = {3'd0,vdump} + {1'b0,b_scry} + (glob_ctrl[5] ? vflip_corr_ext : 12'd0);
@@ -351,13 +316,6 @@ wire [ 1:0] src_page_x, src_page_y, slot_lyr;
 wire [ 1:0] a_x, b_x, c_x, d_x, a_y, b_y, c_y, d_y,
             a_w, b_w, c_w, d_w, a_h, b_h, c_h, d_h;
 wire        b_covers, c_covers, d_covers;
-// a_covers (does layer A's page cover this pixel) is deliberately not
-// computed: layer A is always slot_lyr==0, the lowest-priority tilemap
-// in the active_nx occlusion mux below, so nothing in this design ever
-// asks "is layer A covering the slot below it" -- there is no slot
-// below 0. Confirmed dead (H10): grep of the whole tree shows a_covers
-// assigned once (old line 410) and read nowhere; b/c/d_covers are the
-// real occluders, each used only by slots with lower priority than them.
 wire        assoc_disable, active_nx, tile_slot;
 wire [12:0] tile_ram_addr, line_ram_addr;
 wire [10:0] line_pair_off;
@@ -489,32 +447,11 @@ always @(posedge clk) begin
         end else case( slot_l[1:0] )
             2'd0: begin
                 f_code<={vram1_scan,vram2_scan}; f_pal<={4'd0,tcolor[5:2]};
-                // a_hofs_flip (054157 reg 0x02 bit 0, paired with HOFSA/layer
-                // f) is a per-layer tile-X-flip ENABLE, not an offset sign --
-                // see modules/jt05415x/doc/register_map.md B2. KNOWN from the
-                // Furrtek README ("02[7:0]: bits 0,2,4,6 Enable tile X
-                // flips"); the Moo Mesa ROM leaves all four bits set (1) for
-                // the whole traced run (k054157_regwrites_3600f.jsonl), so
-                // this is a no-op today but removes dead-code register bits.
                 f_hf  <=tflip[0] & a_hofs_flip; f_vf<=tflip[1]; f_en<=active_nx;
             end
             2'd1: begin
                 a_code<={vram1_scan,vram2_scan};
-                // tcolor[1:0] are the two bits MAME's tile_callback discards
-                // from colpre (moo.cpp:290). Only tcolor[0] is wired on the
-                // board: FPAL4 (K054157 DFI8, layer a only) carries it to
-                // the K053251's CI28 pin, landing in a_pal[4] -> lyra_pxl[8]
-                // -> ci2[8] in jtmoo_colmix -- the 054338 blend-enable flag.
-                // B3 (source of FPAL4/DFI8): the 054157 die pinout (Furrtek
-                // beep-out, Metamorphic Force donor) tags this exact physical
-                // pin (die pin 137, the 9th bit of the "B" colour pipeline)
-                // "From ROM data or attribute", i.e. it IS a muxed bit at the
-                // die level. col_src0/col_src1 (register_map.md) are the
-                // only undocumented mmr bits that could select that mux, and
-                // they sit at reg 0x06 bits 6-7, held constant (=1,1) for the
-                // whole traced run -- consistent with, but not proof of,
-                // "attribute" being the selected source. INFERRED: keep the
-                // existing tcolor[0] wiring; do not add an unverified mux.
+                // tcolor[0] reaches K053251 CI28 through FPAL4, the K054338 blend enable
                 a_pal <={3'd0,tcolor[0],tcolor[5:2]};
                 a_hf  <=tflip[0] & b_hofs_flip; a_vf<=tflip[1]; a_en<=active_nx;
             end
@@ -569,10 +506,7 @@ jt054157 u_054157(
 ///////////////////////////////////////////////////////////////////////
 // Graphics ROM read-back window
 ///////////////////////////////////////////////////////////////////////
-// MAME: addr = 0x2000*bank + 2*offset, returned big endian. One bank covers
-// 0x2000 bytes, so the dword address is {bank, offset[11:1]} and offset[0]
-// picks the half of the 32-bit word. The board shares one CA bus among the
-// four pipelines, so the read-back steals the first one while it is active.
+// MAME: addr = 0x2000*bank + 2*offset. The read-back steals the first pipeline while active
 assign lyrf_addr = rmrd_cs ? { rom_bank, cpu_addr[12:2] } : f_rom_addr;
 assign lyrf_cs   = rmrd_cs | f_rom_cs;
 assign lyra_addr = a_rom_addr;
@@ -590,13 +524,11 @@ reg unsupported_vram_timing_l;
 always @(posedge clk) begin
     unsupported_vram_timing_l <= unsupported_vram_timing;
     if( unsupported_vram_timing && !unsupported_vram_timing_l )
-        $display("WARNING (jt05415x): glob_ctrl bit 7/1/0 set (%b) -- these 054156 global-control bits are not modelled", glob_ctrl);
+        $display("WARNING (jt05415x): glob_ctrl bits 7/1/0 not modelled (%b)",
+                 glob_ctrl);
 end
 wire unused_156 = &{ 1'b0, attr_ctrl, addr_ctrl, vram_ctrl, rom_col, rom_vrc,
                      tile_lut, cpu_bank[5:4], cpu_bank[2:1], lnscr_bank[5:1] };
-// a..d_hofs_flip are wired above (tile-X-flip enables); the remaining ten
-// fields are left as dead code -- ROM-observed constants documented in
-// modules/jt05415x/doc/register_map.md (KNOWN, k054157_regwrites_3600f.jsonl)
 wire unused_157 = &{ 1'b0, hofs_phase, clk_fanout, ram_clkph, ramout_mux,
                      dbout_mux, vc_dir, crom_decode, db_lane, col_src0, col_src1 };
 `endif

@@ -41,7 +41,6 @@ module jtmoo_video(
 
     input             scrreg_cs,
     input             scr_cs,
-    input             blnk_sel,
 
     output            vdtac,
     input             tilesys_cs,
@@ -92,7 +91,7 @@ module jtmoo_video(
 
 wire [11:0] lyrf_pxl, lyra_pxl, lyrb_pxl, lyrc_pxl;
 wire [ 8:0] hdump, vdump, lyro_pxl;
-wire [ 7:0] dump_scr, st_scr, dump_obj, scr_mmr, obj_mmr, dump_pal, pal_mmr;
+wire [ 7:0] dump_scr, st_scr, dump_obj, scr_mmr, obj_mmr, dump_pal, pal_mmr, ccu_mmr;
 wire [ 4:0] lyro_pri;
 wire [ 1:0] shadow;
 wire [ 3:0] obj_amsb, ommra;
@@ -112,7 +111,7 @@ jtriders_dump #(.FULLRAM(1)) u_dump(
     .scr_mmr        ( scr_mmr         ),
     .obj_mmr        ( obj_mmr         ),
     .psac_mmr       ( 8'b0            ),
-    .other          ( 8'd0            ),
+    .other          ( ccu_mmr         ),
 
     .ioctl_addr     ( ioctl_addr      ),
     .ioctl_din      ( ioctl_din       ),
@@ -151,7 +150,7 @@ jtk053252 #(.INIT(128'h00_00_00_74_0E_11_07_01_00_00_37_00_21_00_FF_01)) u_k0532
     .int2       (               ),
     // IOCTL dump
     .ioctl_addr ( ioctl_addr[3:0]),
-    .ioctl_din  (               )
+    .ioctl_din  ( ccu_mmr       )
 );
 
 /* verilator tracing_on */
@@ -293,7 +292,6 @@ jtmoo_colmix u_colmix(
     .lyrc_pxl   ( lyrc_pxl  ),
     .lyro_pxl   ( lyro_pxl  ),
     .lyro_pri   ( lyro_pri  ),
-    .blnk_sel   ( blnk_sel  ),
 
     .shadow     ( shadow    ),
 

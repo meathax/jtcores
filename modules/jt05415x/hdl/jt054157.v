@@ -3,22 +3,8 @@
  * Version: 1.0
  * Date: 2-9-2026 */
 
-// K054157 - scroll layer data combiner
-//
-// The chip receives the tile code/attribute stream produced by the K054156
-// and four independent horizontal-offset phases (HOFSA..HOFSD). It turns the
-// graphics ROM words into the four pixel pipelines that the die exposes as
-// ACOL/BCOL/CCOL/DCOL, each one carrying colour plus palette bits.
-//
-// Reference material
-//   - furrtek's silicon RE of the K054156/K054157 pair (schematic pages 3-6
-//     for the pixel muxes and the per-layer HOFS phases)
-//   - MAME k054156_k054157_k056832.cpp for the software facing behaviour
-//
-// The 8-pixel serialiser, ROM address composition and flip handling are not
-// reinvented here: each pipeline is a jtframe_tilemap instance. The original
-// uses a decoder rather than a shift register, which is equivalent as long as
-// the tile data is fetched one tile ahead - see the note in jt051962.v.
+// K054157 scroll layer data combiner: four pixel pipelines (ACOL..DCOL) with HOFSA..HOFSD phases
+// Each pipeline is a jtframe_tilemap instance, fetching one tile ahead as in jt051962.v
 
 module jt054157(
     input             rst,
@@ -34,9 +20,7 @@ module jt054157(
     input      [ 7:0] a_pal,  b_pal,  c_pal,  d_pal,
     input             a_hflip, b_hflip, c_hflip, d_hflip,
     input             a_vflip, b_vflip, c_vflip, d_vflip,
-    // Layer/page association: 1 when this pipeline owns the currently
-    // fetched page (K054156 active_nx), 0 when a higher-priority layer
-    // covers the same page and this one must stay transparent instead.
+    // 1 when this pipeline owns the fetched page, 0 when a higher-priority layer covers it
     input             a_assoc, b_assoc, c_assoc, d_assoc,
 
     // Graphics ROM. One 32-bit word holds eight 4-bit pixels, packed as MAME
@@ -65,9 +49,7 @@ jtframe_8x8x4_packed_msb u_bsort( b_rom_data, b_sort );
 jtframe_8x8x4_packed_msb u_csort( c_rom_data, c_sort );
 jtframe_8x8x4_packed_msb u_dsort( d_rom_data, d_sort );
 
-// VA is left at the value implied by MAP_HW/MAP_VW so the module's internal
-// consistency check passes. vram_addr is unused: the K054156 owns the VRAM
-// address, including the page grid and the line-scroll fetches.
+// vram_addr unused: the K054156 owns the VRAM address
 jtframe_tilemap #(
     .SIZE(8), .CW(16), .PW(12), .BPP(4),
     .VA(11), .MAP_HW(9), .MAP_VW(8),

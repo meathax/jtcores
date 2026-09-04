@@ -34,6 +34,9 @@ parameter [SIZE*8-1:0] INIT=0; // from high to low regs {mmr[3],mmr[2],mmr[1],mm
 
 reg  [ 7:0] mmr[0:SIZE-1];
 integer     i;
+`ifdef SIMULATION
+reg [7:0] mmr_init[0:SIZE-1];
+`endif
 {{ range .Regs }}{{ if not .IsEvent }}{{ $chunks := .Chunks }}
 assign {{.Name}} = {
 {{- range $idx, $chunk := $chunks }}
@@ -44,11 +47,11 @@ assign {{.Name}} = {
 
 always @(posedge clk) begin
     if( rst ) begin
-        // INIT is used unconditionally so simulation matches synthesis.
-        // The old SIMFILE path ($fopen/$fread in an initial block) was
-        // never populated by any core and crashed the sim tool.
+    `ifndef SIMULATION
         for(i=0;i<SIZE;i=i+1) mmr[i] <= INIT[i*8+:8];
-        {{ range .Regs }}{{ if .IsEvent }}
+    `else
+        for(i=0;i<SIZE;i=i+1) mmr[i] <= mmr_init[i];
+    `endif {{ range .Regs }}{{ if .IsEvent }}
         {{.Name}} <= 0; {{ end }}{{- end }}{{ if not .Read_only }}
     dout <= 0; {{- end }}
     end else begin{{ range .Regs }}{{ if .IsEvent }}
@@ -67,9 +70,29 @@ always @(posedge clk) begin
     end
 end
 
-// SIMFILE/mmr_init loading via $fopen/$fread removed -- segfaulted the
-// sim tool on this Windows toolchain regardless of mechanism (see
-// comment on the reset always-block above). SIMFILE/SEEK parameters
-// kept for interface compatibility but are now unused.
+`ifdef SIMULATION
+/* verilator tracing_off */
+integer f, fcnt, err;
+initial begin
+    f=$fopen(SIMFILE,"rb");
+    err=$fseek(f,SEEK,0);
+    if( f!=0 && err!=0 ) begin
+        $display("Cannot seek file rest.bin to offset 0x%0X (%0d)",SEEK,SEEK);
+    end
+    if( f!=0 ) begin
+        fcnt=$fread(mmr_init,f);
+        $display("MMR %m - read %0d bytes from offset %0d",fcnt,SEEK);
+        if( fcnt!=SIZE ) begin
+            $display("WARNING: Missing %d bytes for %m.mmr",SIZE-fcnt);
+        end else begin{{ range .Regs }}{{ if not .IsEvent }}{{ $chunks := .Chunks }}
+            $display("\t{{.Name}} = %X",{ {{range $idx, $chunk := $chunks}}mmr_init[{{$chunk.Byte}}][{{if eq $chunk.Msb $chunk.Lsb}}{{$chunk.Msb}}{{else}}{{$chunk.Msb}}:{{$chunk.Lsb}}{{end}}]{{ if lt (add1 $idx) (len $chunks) }}, {{end}}{{end}} });
+            {{- end }}{{ end }}
+        end
+    end else begin
+        for(i=0;i<SIZE;i=i+1) mmr_init[i] = 0;
+    end
+    $fclose(f);
+end
+`endif
 
 endmodule

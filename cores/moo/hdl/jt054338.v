@@ -27,8 +27,6 @@ module jt054338 #(
     output            clipsl,
     output     [23:0] dump_mmr,
     output     [ 7:0] bri1_lvl,
-    output     [ 7:0] bri2_lvl,
-    output     [ 7:0] bri3_lvl,
 
     output signed [9:0] shadow_r,
     output signed [9:0] shadow_g,
@@ -64,15 +62,11 @@ assign shdpri      = regs[CONTROL][2];
 assign brtpri      = regs[CONTROL][3];
 assign clipsl      = regs[CONTROL][5];
 assign dump_mmr    = { regs[CONTROL][7:0], regs[BRI3][7:0], regs[PBLEND][7:0] };
+assign bri1_lvl    = regs[BRI3][7:0];
 
 assign shadow_r    = {shd_r9[8], shd_r9};
 assign shadow_g    = {shd_g9[8], shd_g9};
 assign shadow_b    = {shd_b9[8], shd_b9};
-
-// reg 11[7:0], reg 12[15:8]/[7:0] = brightness codes 1/2/3
-assign bri1_lvl    = regs[BRI3][7:0];
-assign bri2_lvl    = regs[BRI3+4'd1][15:8];
-assign bri3_lvl    = regs[BRI3+4'd1][7:0];
 
 always @(posedge clk, posedge rst) begin
     if( rst ) begin

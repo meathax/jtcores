@@ -46,7 +46,6 @@ module jtmoo_main(
     output reg           scrreg_cs,
     output reg           objcha_n,
     output reg           rmrd_cs,  // graphics ROM read-back window
-    output reg           blnk_sel,
     input                dma_bsy,
     // EEPROM
     output        [ 6:0] nv_addr,
@@ -216,7 +215,6 @@ always @(posedge clk, posedge rst) begin
         eep_clk <= 0;
         intdma_enb <= 1;
         objcha_n   <= 1;
-        blnk_sel   <= 0;
         cur_ctrl2  <= 0;
     end else begin
         if( reg_cs & ~rw ) begin
@@ -227,7 +225,6 @@ always @(posedge clk, posedge rst) begin
             if( !dsn_mx[1] ) begin
                 cur_ctrl2[15:8] <= cpu_dout[15:8];
                 objcha_n <= ~cpu_dout[8];
-                blnk_sel <=  cpu_dout[9];
             end
         end
     end

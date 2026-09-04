@@ -18,9 +18,7 @@ module jtsimson_obj #(parameter
     ESTRIDE_LOG2 = 3,
     ENTRY_LOG2   = 9,
     parameter [9:0] HOFFSET   = 10'd62,
-    // See jt053246.sv: forces mode8=0 (16-bit register decode) regardless
-    // of cfg[2]. Default 0 reproduces today's behaviour. Declared with its
-    // own `parameter` keyword so it does not inherit HOFFSET's [9:0] type.
+    // forces mode8=0, see jt053246.sv
     parameter       FORCE16   = 0
 )(
     input             rst,

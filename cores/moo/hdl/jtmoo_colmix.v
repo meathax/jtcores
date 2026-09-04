@@ -31,7 +31,6 @@ module jtmoo_colmix(
     input      [11:0] lyrc_pxl, // plane 3 -> CI4
     input      [ 8:0] lyro_pxl,
     input      [ 4:0] lyro_pri,
-    input             blnk_sel,
 
     input      [ 1:0] shadow,
 
@@ -52,7 +51,7 @@ wire [23:0] k338_bg, k338_dump;
 wire [15:0] k338_dout;
 wire [10:0] col, pal_addr, cpu_pal_addr;
 wire [ 8:0] ci0, ci1, ci2;
-wire [ 7:0] ci3, ci4, k251_dump, alpha_level, bri1_lvl, bri2_lvl, bri3_lvl,
+wire [ 7:0] ci3, ci4, k251_dump, alpha_level, bri1_lvl,
             pal_r, pal_g, pal_b, cpu_r, cpu_g, cpu_b, f_pal_r, f_pal_g, f_pal_b,
             k338_byte;
 wire [ 5:0] pri0;
@@ -191,7 +190,9 @@ always @(posedge clk, posedge rst) begin
                                                mix_blend(fg8,g8,alpha_level,alpha_add),
                                                mix_blend(fr8,r8,alpha_level,alpha_add) } :
                        ~|shd_l          ? { b8, g8, r8 } :
-                                          { add_clip(b8,shad_b,clipsl), add_clip(g8,shad_g,clipsl), add_clip(r8,shad_r,clipsl) },
+                                        { add_clip(b8,shad_b,clipsl),
+                                          add_clip(g8,shad_g,clipsl),
+                                          add_clip(r8,shad_r,clipsl) },
                        bri_l, bri1_lvl );
         end
     end
@@ -232,8 +233,6 @@ jt054338 u_k338(
     .clipsl      ( clipsl          ),
     .dump_mmr    ( k338_dump       ),
     .bri1_lvl    ( bri1_lvl        ),
-    .bri2_lvl    ( bri2_lvl        ),
-    .bri3_lvl    ( bri3_lvl        ),
 
     .shadow_r    ( shad_r          ),
     .shadow_g    ( shad_g          ),
@@ -351,9 +350,8 @@ jtframe_dual_ram #(.AW(8)) u_fpal_b(
 );
 
 `ifdef SIMULATION
-wire unused_colmix = &{ 1'b0, blnk_sel, lyrb_pxl[4], lyrf_l[11:8],
-                        lyra_pxl[11:9], lyrb_pxl[11:8], lyrc_pxl[11:8],
-                        bri2_lvl, bri3_lvl };
+wire unused_colmix = &{ 1'b0, lyrb_pxl[4], lyrf_l[11:8],
+                        lyra_pxl[11:9], lyrb_pxl[11:8], lyrc_pxl[11:8] };
 `endif
 
 endmodule

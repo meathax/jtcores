@@ -74,14 +74,6 @@ always @* begin
     endcase
 end
 
-// Despite the name, this returns 1 for a *transparent* pixel (colour
-// index 0, i.e. no colour), not an opaque one -- the result feeds op[]/
-// col_n as "this input is blank". On real Konami boards (see Moo Mesa's
-// 053251, M9 pin 89 NCOL) the equivalent net is active-low-transparent
-// too, so col_n's polarity matches the board's NCOL, not a hypothetical
-// same-named CBLKI-style active-high "colour present" pin some other
-// chip's schematic might use -- do not assume col_n can be wired directly
-// to a "colour present" net without checking its polarity first.
 function opaque( input full, input [7:0] col );
 begin
     opaque = ~|col[3:0];

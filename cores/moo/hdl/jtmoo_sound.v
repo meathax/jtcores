@@ -23,13 +23,11 @@ module jtmoo_sound(
     input   [ 7:0]  rom_data,
     input           rom_ok,
     // PCM ROM
-    output  [21:0]  pcm_addr,
+    output  [20:0]  pcm_addr,
     input   [ 7:0]  pcm_data,
     output          pcm_cs,
-    input           pcm_ok,
     // Sound output
-    output     signed [15:0] k539_l, k539_r,
-    output     signed [15:0] fm_l, fm_r,
+    output     signed [15:0] snd_l, snd_r,
     // Debug
     input    [ 7:0] debug_bus,
     output   [ 7:0] st_dout
@@ -41,15 +39,11 @@ wire [ 3:0] rom_hi;
 reg  [ 3:0] bank;
 wire [15:0] A;
 wire        m1_n, mreq_n, rd_n, wr_n, iorq_n, rfsh_n, nmi_n,
-            cpu_cen, fm_intn, latch_we, int_n, snd_pal8_n, bank_we_fall;
+            cpu_cen, fm_intn, latch_we, int_n, bank_we_fall;
 reg         ram_cs, fm_cs, k39_cs, k21_cs, bank_we, mem_acc, nmi_clr, bank_we_l;
-wire signed [15:0] pcm_l, pcm_r, fm_pre_l, fm_pre_r;
-wire [ 1:0] nc;
+wire signed [15:0] fm_l, fm_r, k539_l, k539_r;
+wire [ 2:0] nc;
 
-// 054744 SND~PAL8
-assign snd_pal8_n = ~( ( A[15] &  A[14] & A[13] & ~A[12] & A[11] & A[10] ) |
-                       ( ~m1_n & ~A[15] & A[14] )                          |
-                       ( ~m1_n & ~A[14] ) );
 assign latch_we = k21_cs && !wr_n;
 assign rom_hi   = A[15] ? bank : {3'd0, A[14]};
 assign rom_addr = {rom_hi, A[13:0]};
@@ -71,7 +65,7 @@ always @(*) begin
     bank_we = mem_acc && A[15:10]==6'b1111_10;       // /SBANK_WR F800-FBFF
 end
 
-// bank latch clocks on any F800-FBFF access, not gated by write
+// the bank latch clocks on any F800-FBFF access, not gated by write
 always @(posedge clk) if(cpu_cen) bank_we_l <= bank_we;
 
 always @(posedge clk, posedge rst) begin
@@ -135,15 +129,15 @@ jt51 u_jt51(
     .ct2        (           ),
     .irq_n      ( fm_intn   ),
     .sample     (           ),
-    .left       ( fm_pre_l  ),
-    .right      ( fm_pre_r  ),
+    .left       (           ),
+    .right      (           ),
     // Full resolution output
-    .xleft      (           ),
-    .xright     (           )
+    .xleft      ( fm_l      ),
+    .xright     ( fm_r      )
 );
 
 /* verilator tracing_on */
-jt054539 #(.VOLSHIFT(1)) u_k054539(
+jt539 #(.VOLSHIFT(1)) u_k54539(
     .rst        ( rst       ),
     .clk        ( clk       ),
     .cen        ( cen_pcm   ),
@@ -159,16 +153,17 @@ jt054539 #(.VOLSHIFT(1)) u_k054539(
     .rom_cs     ( pcm_cs    ),
     .rom_addr   ({nc,pcm_addr}),
     .rom_data   ( pcm_data  ),
-    .rom_ok     ( pcm_ok    ),
+    // YM input, AUX1
+    .aux_l      ( fm_l      ),
+    .aux_r      ( fm_r      ),
     // Sound output
-    .left       ( pcm_l     ),
-    .right      ( pcm_r     ),
+    .left       ( k539_l    ),
+    .right      ( k539_r    ),
     // debug
     .debug_bus  ( debug_bus ),
     .st_dout    ( st_dout   )
 );
 
-// one volume register applies to both PCM and FM
 jt054321 #(.AUDIO(1)) u_54321(
     .rst        ( rst       ),
     .clk        ( clk       ),
@@ -186,17 +181,11 @@ jt054321 #(.AUDIO(1)) u_54321(
     .snd_on     ( snd_irq   ),
     .siorq_n    ( iorq_n    ),
     .int_n      ( int_n     ),
-    .pal8_n     ( snd_pal8_n),
-    // PCM volume
-    .snd_l      ( pcm_l     ),
-    .snd_r      ( pcm_r     ),
-    .out_l      ( k539_l    ),
-    .out_r      ( k539_r    ),
-    // FM volume
-    .snd2_l     ( fm_pre_l  ),
-    .snd2_r     ( fm_pre_r  ),
-    .out2_l     ( fm_l      ),
-    .out2_r     ( fm_r      )
+    // global volume
+    .snd_l      ( k539_l    ),
+    .snd_r      ( k539_r    ),
+    .out_l      ( snd_l     ),
+    .out_r      ( snd_r     )
 );
 `else
 initial rom_cs   = 0;
@@ -204,6 +193,6 @@ assign  rom_addr = 0;
 assign  pcm_addr = 0;
 assign  pcm_cs   = 0;
 assign  st_dout  = 0;
-assign  { pair_dout, k539_l, k539_r, fm_l, fm_r } = 0;
+assign  { pair_dout, snd_l, snd_r } = 0;
 `endif
 endmodule

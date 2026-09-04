@@ -10,8 +10,7 @@ module jtmoo_game(
 wire        snd_irq, rmrd_cs, rst8, rst_snd, dma_bsy,
             pal_cs, cpu_we, tilesys_cs, objsys_cs, pcu_cs, k338_cs, objcha_n,
             vdtac, flip,
-            objreg_cs, scrreg_cs, scr_cs, pair_we, cco_cs, rw, int1,
-            blnk_sel;
+            objreg_cs, scrreg_cs, scr_cs, pair_we, cco_cs, rw, int1;
 wire [ 1:0] oram_we;
 wire [ 7:0] vtimer_mmr;
 wire [15:0] pal_dout, oram_dout;
@@ -75,7 +74,6 @@ jtmoo_main u_main(
     .objreg_cs      ( objreg_cs     ),
     .scrreg_cs      ( scrreg_cs     ),
     .objcha_n       ( objcha_n      ),
-    .blnk_sel       ( blnk_sel      ),
 
     .oram_we        ( oram_we       ),
     .oram_cs        ( objsys_cs     ),
@@ -131,7 +129,6 @@ jtmoo_video u_video (
     .tilesys_cs     ( tilesys_cs    ),
     .scr_cs         ( scr_cs        ),
     .scrreg_cs      ( scrreg_cs     ),
-    .blnk_sel       ( blnk_sel      ),
     .pal_cs         ( pal_cs        ),
     .pcu_cs         ( pcu_cs        ),
     .k338_cs        ( k338_cs       ),
@@ -205,12 +202,9 @@ jtmoo_sound u_sound(
     .pcm_addr       ( pcm_addr      ),
     .pcm_data       ( pcm_data      ),
     .pcm_cs         ( pcm_cs        ),
-    .pcm_ok         ( pcm_ok        ),
     // Sound output
-    .k539_l         ( k539_l        ),
-    .k539_r         ( k539_r        ),
-    .fm_l           ( fm_l          ),
-    .fm_r           ( fm_r          ),
+    .snd_l          ( k539_l        ),
+    .snd_r          ( k539_r        ),
     // Debug
     .debug_bus      ( debug_bus     ),
     .st_dout        ( st_snd        )

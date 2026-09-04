@@ -15,9 +15,7 @@ clocks:
         - cen_pcm
 audio:
   gain: 1.99
-  # FM and PCM share the K054321 volume register, rsum/rc values are not measured
   channels:
-    - { name: fm,     module: jt51,     rsum: 1k, rc: [ { r: rout, c: 2.2n } ] }
     - { name: k539,   module: jt054539, rsum: 1k, rc: [ { r: 4.7k, c: 2.2n } ] }
 sdram:
   banks:
@@ -30,14 +28,13 @@ sdram:
         - name: main
           addr_width: 21
           data_width: 16
-          cache_size: 32kB
+          cache_size: 1kB
     - buses:
         - name: snd
           addr_width: 18
           data_width: 8
         - name: pcm
-          # Bucky O'Hare populates a second 2 MB ROM
-          addr_width: 22
+          addr_width: 21
           data_width: 8
           offset: PCM_OFFSET
     - buses:
@@ -63,5 +60,6 @@ bram:
     addr_width: 7
     data_width: 8
     simfile: {}
+
     rw: true
     ioctl: { save: true, restore: true, order: 0 }
