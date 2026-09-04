@@ -49,11 +49,12 @@ module jt05415x(
 parameter SIMFILE156 = "rest.bin",
           SIMFILE157 = "rest.bin";
 
-// Per-layer horizontal offsets, same values for Moo Mesa and Bucky O'Hare (MAME set_layer_offs)
-localparam signed [12:0] HOFSA = -13'sd2,
-                         HOFSB =  13'sd2,
-                         HOFSC =  13'sd4,
-                         HOFSD =  13'sd6;
+// Per-layer horizontal offsets. These add to the source x, so they are the
+// negation of MAME's set_layer_offs for moomesa (moo.cpp:301-304 = -1/3/5/7)
+localparam signed [12:0] HOFSA =  13'sd1,
+                         HOFSB = -13'sd3,
+                         HOFSC = -13'sd5,
+                         HOFSD = -13'sd7;
 // jtframe_tilemap requests a tile one group before it is displayed
 localparam [12:0] PREFETCH = 13'd8;
 
