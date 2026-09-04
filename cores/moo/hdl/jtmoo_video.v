@@ -217,7 +217,8 @@ assign orama = {cpu_addr[15:8], cpu_addr[5:1]}; // A6/A7 not connected
 
 /* verilator tracing_on */
 jtsimson_obj #(.RAMW(13),.SHADOW(1),.ESTRIDE_LOG2(5),.ENTRY_LOG2(8),
-    .HOFFSET(10'h3d1)) u_obj(          // MAME set_config(..., -48+1, 23): dx=-47
+    .HOFFSET(10'h3d1),                 // MAME set_config(..., -48+1, 23): dx=-47
+    .FORCE16(1)) u_obj(     // F10 has both ~UDS/~LDS: board is 16-bit only
     .rst        ( rst       ),
     .clk        ( clk       ),
     .pxl_cen    ( pxl_cen   ),
