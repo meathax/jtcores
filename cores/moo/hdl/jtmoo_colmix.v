@@ -87,7 +87,7 @@ assign pri0      = { lyro_pri, 1'b1 };
 assign ci0       = lyro_pxl;
 assign ci1       = 9'd0;
 assign ci2       = lyra_pxl[8:0];
-assign ci3       = { 1'b0, lyrb_pxl[7:5], lyrb_pxl[3:0] }; // only CI30..CI36 wired
+assign ci3       = { lyrb_pxl[7:5], 1'b0, lyrb_pxl[3:0] }; // DSB4 not wired to M9
 assign ci4       = lyrc_pxl[7:0];
 
 // MIX0 = COL8 & ~COL9 & ~COL10, MIX1 tied low
