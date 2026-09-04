@@ -25,6 +25,7 @@ module jtmoo_prot(
     input         [15:0] din,
     input                cpu_we,
     input                dtack_n,
+    output        [15:0] dout,   // register read-back for the CPU
 
     // Bus mastership
     output reg           bus_asn,
@@ -50,6 +51,7 @@ wire        wr_trig = cs & cpu_we & (addr==4'hc) & ~wr_l;
 
 assign bus_addr = a;
 assign bus_dsn  = 2'b00; // whole words only
+assign dout     = mmr[addr];
 
 always @(posedge clk) begin
     if( rst ) begin
@@ -80,7 +82,7 @@ always @(posedge clk) begin
         a       <= 0;
     end else if( cen ) begin
         case( st )
-            0: if( trig ) begin
+            0: if( trig && |mmr[15] ) begin // MAME while(length){} is a no-op at 0
                 // 24-bit byte pointers, high byte in the odd register
                 p1  <= { mmr[1][7:0], mmr[0][15:1] };
                 p2  <= { mmr[3][7:0], mmr[2][15:1] };
@@ -116,6 +118,7 @@ end
 `else
 assign bus_addr = 0;
 assign bus_dsn  = 3;
+assign dout     = 16'd0;
 initial begin
     bus_asn = 1;
     bus_din = 0;

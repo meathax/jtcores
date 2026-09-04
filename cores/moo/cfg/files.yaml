@@ -6,8 +6,6 @@ riders:
   - get:
     - jt054321.v
     - jtriders_dump.v
-    - jtriders_tmnt2.v
-    - jtriders_tmnt2_zoom.v
 rungun:
   - get:
     - jtk053252.v

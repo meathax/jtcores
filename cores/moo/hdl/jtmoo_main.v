@@ -81,7 +81,7 @@ reg  [15:0] cpu_din, cab_dout, cur_ctrl2;
 reg  [ 7:0] io_dout;
 wire        eep_rdy, eep_do, bus_cs, bus_busy, BUSn;
 wire        intdma;
-wire [15:0] cpu_dout_68k, prot_dout, prot_din;
+wire [15:0] cpu_dout_68k, prot_dout, prot_din, prot_regdout;
 wire [ 1:0] dsn_mx, prot_dsn;
 wire        prot_asn, prot_wrn, prot_brn, prot_bgackn, BGn;
 
@@ -193,7 +193,7 @@ always @(posedge clk) begin
                (pal_cs|k338_cs) ? pal_dout :
                reg_cs  ? cur_ctrl2       :
                cco_cs  ? {8'd0,vtimer_mmr}:
-               prot_cs ? prot_din        :
+               prot_cs ? prot_regdout    :
                pair_cs ? {8'd0,pair_dout}:
                io_cs   ? {8'd0,io_dout  }:
                cab_cs  ? cab_dout        : 16'hffff;
@@ -239,6 +239,7 @@ jtmoo_prot u_prot(
     .din        ( cpu_dout      ),
     .cpu_we     ( cpu_we        ),
     .dtack_n    ( DTACKn        ),
+    .dout       ( prot_regdout  ),
 
     // DMA
     .bus_asn    ( prot_asn      ),
