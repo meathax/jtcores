@@ -2,23 +2,7 @@
     core: rungun
     name: k053252
 
-# E3: register-map documentation for the K054338 colour combiner and K053251
-# priority mixer, so their SD-card/debug dump shows the real register layout
-# instead of only the 3 words (CONTROL/BRI3/PBLEND) the hand-rolled
-# jt054338.v dump_mmr port exposed. Field layout cross-checked against the
-# current cores/moo/hdl/jt054338.v (localparams BGC_R/BGC_GB/SHAD1R/BRI3/
-# PBLEND/CONTROL and the pblend mux) and cores/simson/hdl/jtcolmix_053251.v
-# (mmr[0..12] usage). Neither module is itself a `jtframe mmr` consumer --
-# jt054338.v keeps its own regs[] array (functional path unchanged) and
-# jtcolmix_053251.v is shared with cores/simson and off limits to edit here
-# -- so cores/moo/hdl/jtmoo_colmix.v instantiates the two generated modules
-# below as read-only shadow decoders (same cs/we/addr/data as the real
-# instances) purely to source a complete byte-addressable ioctl_din for the
-# SD-card dump chain (mmr_dump), alongside the existing hand-written palette
-# dump. bri2_lvl/bri3_lvl (register 12) are documented for completeness even
-# though jt054338.v itself only exposes bri1_lvl (deliberate, see commit
-# 63bb1aa "reduce the jt054338 delta to the single bri1_lvl output that
-# colmix uses" -- BRI1 is tied on the board, see jtmoo_colmix.v).
+# K054338 and K053251 register maps, used only for the SD-card register dump
 - name: k054338
   no_core_name: true
   size: 32

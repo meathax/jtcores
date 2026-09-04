@@ -4,15 +4,9 @@
  * Version: 1.0
  * Date: 4-9-2026 */
 
-// K053990 (N4) as Moo Mesa uses it: a bus-mastering block operation
-//     dst[i] = src1[i] + 2*src2[i]
-// over `len` 16-bit words. The register file lives at 0x0CE000-0x0CE01F and a
-// write to word offset 0x0C (0x0CE018) starts the transfer.
-//
-// Riders/TMNT2 drive the same chip in its sprite-DMA mode; that mode has a
-// different register layout and is modelled by cores/riders/hdl/jtriders_tmnt2.v
-// The boot ROM checks this operation at 0x049E7C-0x049F04 and prints
-// "N4  DEVICE ERROR" (string at ROM 0x141A3E) when the read-back fails.
+// K053990 as Moo Mesa uses it: bus-mastering block operation dst[i]=src1[i]+2*src2[i]
+// over len words, registers at 0x0CE000-1F, write to 0x0CE018 starts it (MAME moo.cpp)
+// Riders/TMNT2 use the chip's sprite-DMA mode instead, see jtriders_tmnt2.v
 
 module jtmoo_prot(
     input                rst,
