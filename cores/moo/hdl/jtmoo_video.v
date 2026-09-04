@@ -124,8 +124,7 @@ jtriders_dump #(.FULLRAM(1)) u_dump(
     .st_dout        ( st_dout         )
 );
 
-// INIT holds the values the game programs; without it the CCU never cycles
-jtk053252 #(.INIT(128'h00_00_00_74_0E_11_07_01_00_00_37_00_21_00_FF_01)) u_k053252(
+jtk053252 u_k053252(
     .rst        ( rst           ),
     .clk        ( clk           ),
     .pxl_cen    ( pxl_cen       ),
