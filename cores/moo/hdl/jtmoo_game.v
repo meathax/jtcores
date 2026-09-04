@@ -1,14 +1,10 @@
 /* SPDX-FileCopyrightText: 2026 Jose Tejada Gomez
  * SPDX-License-Identifier: GPL-3.0-or-later
- * Author: Rafael Eduardo Paiva Feener. Copyright: Jose Tejada Gomez
- * Version: 1.0
  * Date: 17-6-2026 */
 
 module jtmoo_game(
     `include "jtframe_game_ports.inc" // see $JTFRAME/hdl/inc/jtframe_game_ports.inc
 );
-
-localparam BUCKY = 1;
 
 /* verilator tracing_off */
 wire        snd_irq, rmrd_cs, rst8, rst_snd, dma_bsy,
@@ -21,36 +17,19 @@ wire [ 7:0] vtimer_mmr;
 wire [15:0] pal_dout, oram_dout;
 wire [15:0] video_dumpa;
 reg  [ 7:0] debug_mux;
-// reg  [ 2:0] game_id;
 wire [15:0] tilesys_dout;
 wire [ 7:0] pair_dout, st_main, st_video, st_snd;
 wire [ 3:0] vtimer_addr;
-reg         bucky;
 
 assign debug_view = debug_mux;
-// The board has no cabinet flip switch: the game flips the screen through the
-// K054156 global control register, and that state is reported back to JTFRAME
 assign dip_flip   = flip;
 assign ram_addr   = main_addr[15:1];
-assign video_dumpa= ioctl_addr[15:0]-16'h80; // subtract NVRAM offset
+assign video_dumpa= ioctl_addr[15:0]-16'h80;
 assign vtimer_addr= main_addr[4:1];
 assign rst_snd    = rst;
 
 always @(posedge clk) begin
     debug_mux <= st_snd;
-    // case( debug_bus[7:6] )
-    //     0: debug_mux <= st_main;
-    //     1: debug_mux <= st_video;
-    //     2: debug_mux <= st_snd;
-    //     3: debug_mux <= 8'd0;
-    //     default: debug_mux <= 0;
-    // endcase
-end
-
-always @(posedge clk) begin
-    if( prog_addr[3:0]==15 && prog_we && header ) begin
-        bucky   <= prog_data[BUCKY];
-    end
 end
 
 /* verilator tracing_on */
@@ -58,7 +37,6 @@ jtmoo_main u_main(
     .rst            ( rst           ),
     .clk            ( clk           ),
     .cen_16         ( cen_16        ),
-    .bucky          ( bucky         ),
     .int1           ( int1          ),
 
     .cpu_we         ( cpu_we        ),
@@ -146,7 +124,6 @@ jtmoo_video u_video (
     // Object DMA
     .oram_we        ( oram_we       ),
     .dma_bsy        ( dma_bsy       ),
-    .bucky          ( bucky         ),
 
     .objsys_cs      ( objsys_cs     ),
     .objreg_cs      ( objreg_cs     ),
@@ -228,13 +205,12 @@ jtmoo_sound u_sound(
     .pcm_addr       ( pcm_addr      ),
     .pcm_data       ( pcm_data      ),
     .pcm_cs         ( pcm_cs        ),
-    .pcm_ok         ( pcm_ok        ), // C5 (port): was ungenerated-but-available on
-                                        // mem_ports.inc, never threaded through before
+    .pcm_ok         ( pcm_ok        ),
     // Sound output
     .k539_l         ( k539_l        ),
     .k539_r         ( k539_r        ),
-    .fm_l           ( fm_l          ), // C5 (port): FM's own mixer channel now that
-    .fm_r           ( fm_r          ), // it's no longer summed inside the K054539
+    .fm_l           ( fm_l          ),
+    .fm_r           ( fm_r          ),
     // Debug
     .debug_bus      ( debug_bus     ),
     .st_dout        ( st_snd        )

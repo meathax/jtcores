@@ -1,0 +1,44 @@
+Sound CPU address decoding, E7 (PAL16L8)
+Decoded from the fusemap dumped by Caius
+
+Inputs:
+
+1  - /M1
+2  - /RD
+3  - /RFSH
+4  - /MREQ
+5  - A15
+6  - A14
+7  - A13
+8  - A12
+9  - A11
+11 - A10
+
+Outputs:
+
+12 - SND/PAL8   - to K054321 pin 24
+13 - NC
+14 - /SBANK_WR  - bank/NMI latch clock (D7, 74LS174)
+15 - /SLATCHES  - K054321
+16 - /FM        - YM2151
+17 - /PCM       - K054539
+18 - /SRAM      - MB8464
+19 - /SROM      - program ROM
+
+Equations:
+
+/SROM     = /RD & RFSH & /MREQ & /A15 &  A14 +
+            /RD & RFSH & /MREQ & /A14                                   ; 0000-BFFF
+/SRAM     = RFSH & /MREQ &  A15 &  A14 & /A13                           ; C000-DFFF
+/PCM      = RFSH & /MREQ &  A15 &  A14 &  A13 & /A12 & /A11             ; E000-E7FF
+/FM       = RFSH & /MREQ &  A15 &  A14 &  A13 & /A12 &  A11             ; E800-EFFF
+/SLATCHES = RFSH & /MREQ &  A15 &  A14 &  A13 &  A12 & /A11             ; F000-F7FF
+/SBANK_WR = RFSH & /MREQ &  A15 &  A14 &  A13 &  A12 &  A11 & /A10      ; F800-FBFF
+/pin13    = RFSH & /MREQ & /A15 &  A14 +
+            RFSH & /MREQ & /A14
+SND/PAL8  = A15 & A14 & A13 & /A12 & A11 & A10 +                        ; EC00-EFFF
+            /M1 & /A15 & A14 +
+            /M1 & /A14
+
+/PCM, /FM and /SLATCHES have no A10 term, so each window is 2 kB.
+/SBANK_WR has no /WR term: the latch clocks on any F800-FBFF access.

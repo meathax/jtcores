@@ -1,21 +1,8 @@
 [parse]
 sourcefile=[ "moo.cpp" ]
-skip = { bootlegs=true }
-# skip = { bootlegs=true, setnames=[
-    # "xmen6p", "xmen6pu",
-# ]}
-
-# [buttons]
-# names = [
-#     { machine="xmen",     names="Attack,Jump,Mutant Power" },
-# ]
-
+skip = { bootlegs=true, machines=[ "bucky" ] }
 [header]
-info="Offsets for each ROM region. Byte 15 = game selection."
-data = [
-	{ machine="moomesa", offset=15, data="01" },
-    { machine="bucky",   offset=15, data="02" },
-]
+info="Offsets for each ROM region"
 offset = { bits=12, reverse=true, regions=["maincpu","soundcpu","tiles","obj"] }
 
 [ROM]

@@ -1,7 +1,5 @@
 /* SPDX-FileCopyrightText: 2026 Jose Tejada Gomez
  * SPDX-License-Identifier: GPL-3.0-or-later
- * Author: Rafael Eduardo Paiva Feener. Copyright: Jose Tejada Gomez
- * Version: 1.0
  * Date: 17-6-2026 */
 
 module jtmoo_video(
@@ -18,12 +16,6 @@ module jtmoo_video(
 
     // Object DMA
     input      [ 1:0] oram_we,
-    // GAP 6 / B11: Bucky O'Hare's 053247 zmask differs from Moo Mesa's
-    // (moo.cpp:298 vs :312). Routed into jtsimson_obj's `simson` port,
-    // which jt053246_dma.v uses to skip zero-low-byte sprite entries
-    // (0x00FF zmask behaviour) when set. bucky=0 for Moo Mesa keeps
-    // today's zmask=0xFFFF (no entries skipped) -- KNOWN (MAME, tier 3).
-    input              bucky,
     // CPU interface
     input      [16:1] cpu_addr,
     input      [ 1:0] cpu_dsn,
@@ -132,9 +124,7 @@ jtriders_dump #(.FULLRAM(1)) u_dump(
     .st_dout        ( st_dout         )
 );
 
-// video timer, L4 on the schematics. INIT holds the values the game programs
-// at 0D0000-0D001F: HC=512 HFP=33 HBP=55 VC=264 VFP=17 VBP=15 VSW=8 HSW=5.
-// Without it the CCU never cycles and the boot ROM hangs before attract.
+// INIT holds the values the game programs; without it the CCU never cycles
 jtk053252 #(.INIT(128'h00_00_00_74_0E_11_07_01_00_00_37_00_21_00_FF_01)) u_k053252(
     .rst        ( rst           ),
     .clk        ( clk           ),
@@ -226,24 +216,16 @@ jtmoo_scroll u_scroll(
 
 /* verilator tracing_on */
 assign ommra = {cpu_addr[3:1],cpu_dsn[1]};
-// Object RAM word address: F6/F7 (74LS245) on the schematic give
-// {EN7..EN0,EA5..EA1} = {MAIN_A15..A8, MAIN_A5..A1}; A6/A7 are not wired to
-// the RAM at all (each entry's 32 words alias four times across them).
-// Entry stride is therefore 32 words. The DMA-side read address
-// (ESTRIDE_LOG2(5)/ENTRY_LOG2(8) below) uses the same geometry, so the
-// CPU-write and DMA-read views of this RAM agree.
-assign orama = {cpu_addr[15:8], cpu_addr[5:1]};
+assign orama = {cpu_addr[15:8], cpu_addr[5:1]}; // A6/A7 not connected
 
 localparam [9:0] OVOFFSET=0;
 
-// GAP 7 / B10: FORCE16=1 -- Moo Mesa's 053246 pair is unambiguously 16-bit
-// (F10 has both ~UDS and ~LDS). See jt053246.sv comment / B10 evidence log.
-jtsimson_obj #(.RAMW(13),.SHADOW(1),.ESTRIDE_LOG2(5),.ENTRY_LOG2(8),.FORCE16(1)) u_obj(    // sprite logic
+jtsimson_obj #(.RAMW(13),.SHADOW(1),.ESTRIDE_LOG2(5),.ENTRY_LOG2(8),.FORCE16(1)) u_obj(
     .rst        ( rst       ),
     .clk        ( clk       ),
     .pxl_cen    ( pxl_cen   ),
     .pxl2_cen   ( pxl2_cen  ),
-    .simson     ( bucky     ),
+    .simson     ( 1'b0      ),
     .ln_done    (           ),
 
     .voffset    ( OVOFFSET  ),

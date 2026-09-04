@@ -1,13 +1,6 @@
 /* SPDX-FileCopyrightText: 2026 Jose Tejada Gomez
- * SPDX-License-Identifier: GPL-3.0-or-later */
-
-// Scroll section of the Moo Mesa board: K054156 (G4) + K054157 (J1) and the
-// three MB8464 tile RAMs (L10/M10/N10). The chip pair lives in jt05415x.
-//
-// Layer naming follows the K054156 registers. Layer F (the fourth pixel
-// pipeline, the CO bus) bypasses the K053251 entirely on this board;
-// layers A, B and C feed the K053251 inputs CI2, CI3 and CI4 respectively.
-// Layer A (ACOL/APAL) is MAME's plane 2 and feeds CI3.
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Date: 2-9-2026 */
 
 module jtmoo_scroll(
     input             rst,
