@@ -409,11 +409,13 @@ always @* begin
 end
 
 // Tile attribute decode - see MAME k056832_device::get_tile_info
-reg  [ 2:0] slot_l;
+wire [ 2:0] slot_l;
 wire [ 1:0] fbits, attr_flip, flip_msk;
 reg  [ 5:0] tcolor;
 reg  [ 1:0] tflip;
 
+// the scan RAM answers within the pixel period, registering the slot handed each layer the next layer's tile
+assign slot_l    = hdump[2:0];
 assign fbits     = irq_attr[7:6];
 assign attr_flip = fbits==2'd0 ? vram0_scan[7:6] :
                    fbits==2'd1 ? vram0_scan[5:4] :
@@ -437,11 +439,10 @@ reg         f_hf,   a_hf,   b_hf,   c_hf;
 reg         f_vf,   a_vf,   b_vf,   c_vf;
 reg         f_en,   a_en,   b_en,   c_en;
 
-// The RAM answers one clock after the address is applied, so at every pxl_cen
-// the scan outputs belong to the slot captured in slot_l
+// The RAM answers within the pixel period, so at every pxl_cen the scan
+// outputs belong to the slot hdump shows at that edge (slot_l above)
 always @(posedge clk) begin
     if( rst ) begin
-        slot_l <= 0;
         { f_code, a_code, b_code, c_code } <= 0;
         { f_pal,  a_pal,  b_pal,  c_pal  } <= 0;
         { f_hf,   a_hf,   b_hf,   c_hf   } <= 0;
@@ -477,7 +478,6 @@ always @(posedge clk) begin
                 c_hf  <=tflip[0] & d_hofs_flip; c_vf<=tflip[1]; c_en<=active_nx;
             end
         endcase
-        slot_l <= hdump[2:0];
     end
 end
 
