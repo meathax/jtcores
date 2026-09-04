@@ -149,6 +149,21 @@ jt054156_mmr #(
     .st_dout    ( st_156_dout   )
 );
 
+// db_lane/col_src0/col_src1 (K054157 second-bank register 0x06, bits 5/6/7)
+// are decoded here and then only sunk into unused_157 below. This is not a
+// dropped wire: MAME's k056832_device::b_word_w (the second-bank register
+// write handler these bits belong to) is a bare COMBINE_DATA store into
+// m_regsb[]; m_regsb[] is read back only for CPU register reads and, in
+// mw_rom_word_r (a Mystic Warriors-only ROM-readback special case Moo/Bucky
+// never call), m_regsb[2] bit3 (our ramout_mux). get_tile_info()'s own
+// colour/attribute select (`fbits`) reads first-bank m_regs[3] bits 6:7
+// instead - already wired here as `fbits = irq_attr[7:6]` (see `tcolor`
+// below) - not this second-bank register. So MAME's reference model never
+// gives col_src0/col_src1/db_lane any rendering effect either; leaving them
+// unconsumed matches the emulated hardware behaviour we are differential-
+// testing against, not a gap. (evidence: modules/jt05415x/doc/mame/
+// k054156_k054157_k056832.cpp:823,1179-1183,1980, 617-627; register map:
+// modules/jt05415x/doc/register_map.md "Second Bank, K054157" 0x06 row)
 jt054157_mmr #(
     .SIMFILE ( SIMFILE157 )
 ) u_054157_mmr(
@@ -203,6 +218,20 @@ assign ram_we[1] = cpu_wr & ~cpu_attr & ~dsn[1];
 assign ram_we[2] = cpu_wr & ~cpu_attr & ~dsn[0];
 assign vram_dout = cpu_attr ? { 8'd0, cpu_ram0 } : { cpu_ram1, cpu_ram2 };
 
+// Board correspondence (scroll.kicad_sch, MB8464A SRAMs L10/M10/N10; see
+// D:\evidence\moo\audit\sch\scroll.md GAP-6, independently re-checked
+// against the raw VD* net labels this session): u_vram0 (attribute byte,
+// standalone write-enable pattern below) is board M10 (VD16..23, ~CS1 tied
+// to VSS so always selected, own ~ROE3/~RWE3). u_vram1/u_vram2 (the tile
+// code byte pair, independently chip-selected via dsn[1]/dsn[0]) are boards
+// L10 (VD0..7) and N10 (VD8..15) - which of the two is which is not
+// established by the schematic evidence gathered so far, so it is left
+// unclaimed here rather than guessed. This naming only matters for a future
+// raw-VRAM-vs-MAME diff tool; MAME's own k056832 videoram is a flat 16-bit
+// attr/code array (see get_tile_info in doc/mame/...cpp) unrelated to this
+// physical VD bus order, and the RTL's plane semantics (attribute vs code
+// hi/lo) are already unambiguous from cpu_attr/ram_we below, so the IOCTL
+// dump address order (ioctl_addr[14:13] select) is left unchanged.
 jtframe_dual_nvram #(
     .AW      ( 13         ),
     .SIMFILE ( "scr0.bin" )
@@ -503,6 +532,24 @@ wire unused_156 = &{ 1'b0, attr_ctrl, addr_ctrl, vram_ctrl, rom_col, rom_vrc,
                      tile_lut, cpu_bank[5:4], cpu_bank[2:1], lnscr_bank[5:1] };
 wire unused_157 = &{ 1'b0, hofs_phase, clk_fanout, ram_clkph, ramout_mux,
                      dbout_mux, vc_dir, crom_decode, db_lane, col_src0, col_src1 };
+
+// vram_ctrl (K054156 first-bank register 0x0C, bits 5:0 - "CPU/VRAM DB output
+// selection, VRAM strobe selection, RAM address high-bit shift, and
+// active-page/address timing", register_map.md) is decoded above but not
+// modelled: this core always runs one fixed VRAM/CPU access timing rather
+// than switching it per this register. Surface it as a simulation-only
+// warning instead of silently folding it into unused_156, so a game that
+// actually writes non-zero VRAM-timing control bits is flagged instead of
+// silently mismatched.
+reg [5:0] vram_ctrl_l;
+always @(posedge clk) begin
+    if( rst ) vram_ctrl_l <= 0;
+    else begin
+        if( vram_ctrl!=6'd0 && vram_ctrl!=vram_ctrl_l )
+            $display("%m WARNING: unsupported K054156 VRAM timing/strobe control bits written (vram_ctrl=%02x, reg 0x0C) - not modelled by this core",vram_ctrl);
+        vram_ctrl_l <= vram_ctrl;
+    end
+end
 `endif
 
 endmodule

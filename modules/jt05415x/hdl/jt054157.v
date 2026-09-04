@@ -59,6 +59,12 @@ jtframe_tilemap #(
     .vdump      ( a_veff        ),
     .hdump      ( a_heff        ),
     .blankn     ( blankn        ),
+    // Global screen flip is already folded into a_heff/a_veff and into the
+    // hflip/vflip inputs below (jt05415x.v applies glob_ctrl[4:5] before
+    // calling this module). With FLIP_HDUMP=0, FLIP_VDUMP=0 and the default
+    // XOR_HFLIP=XOR_VFLIP=0 on this instance, jtframe_tilemap's own `flip`
+    // input has no effect on heff/veff/hflip/vflip, so tying it low is
+    // equivalent to any other value here, not a discarded signal.
     .flip       ( 1'b0          ),
     .vram_addr  (               ),
     .code       ( a_code        ),
@@ -82,7 +88,7 @@ jtframe_tilemap #(
     .vdump      ( b_veff        ),
     .hdump      ( b_heff        ),
     .blankn     ( blankn        ),
-    .flip       ( 1'b0          ),
+    .flip       ( 1'b0          ),  // see u_lyra flip note above
     .vram_addr  (               ),
     .code       ( b_code        ),
     .pal        ( b_pal         ),
@@ -105,7 +111,7 @@ jtframe_tilemap #(
     .vdump      ( c_veff        ),
     .hdump      ( c_heff        ),
     .blankn     ( blankn        ),
-    .flip       ( 1'b0          ),
+    .flip       ( 1'b0          ),  // see u_lyra flip note above
     .vram_addr  (               ),
     .code       ( c_code        ),
     .pal        ( c_pal         ),
@@ -128,7 +134,7 @@ jtframe_tilemap #(
     .vdump      ( d_veff        ),
     .hdump      ( d_heff        ),
     .blankn     ( blankn        ),
-    .flip       ( 1'b0          ),
+    .flip       ( 1'b0          ),  // see u_lyra flip note above
     .vram_addr  (               ),
     .code       ( d_code        ),
     .pal        ( d_pal         ),
