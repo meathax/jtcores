@@ -201,6 +201,7 @@ jtmoo_sound u_sound(
     .pcm_addr       ( pcm_addr      ),
     .pcm_data       ( pcm_data      ),
     .pcm_cs         ( pcm_cs        ),
+    .pcm_ok         ( pcm_ok        ),
     // Sound output
     .k539_l         ( k539_l        ),
     .k539_r         ( k539_r        ),

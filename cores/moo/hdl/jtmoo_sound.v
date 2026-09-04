@@ -26,6 +26,7 @@ module jtmoo_sound(
     output   [20:0] pcm_addr,
     input    [ 7:0] pcm_data,
     output          pcm_cs,
+    input           pcm_ok,
     // Sound output
     output signed [15:0] k539_l, k539_r,
     // Debug
@@ -39,7 +40,7 @@ wire [ 3:0] rom_hi;
 reg  [ 3:0] bank;
 wire [15:0] A;
 wire        m1_n, mreq_n, rd_n, wr_n, iorq_n, rfsh_n, nmi_n,
-            cpu_cen, fm_intn, latch_we, int_n, bank_we_fall;
+            cpu_cen, fm_intn, latch_we, int_n, bank_we_fall, k39_busy;
 reg         ram_cs, fm_cs, k39_cs, k21_cs, bank_we, mem_acc, nmi_clr, bank_we_l;
 wire signed [15:0] fm_l, fm_r;
 wire [ 2:0] nc;
@@ -91,7 +92,7 @@ jtframe_edge #(.QSET(0)) u_edge (
 jtframe_sysz80 #(`ifdef SND_RAMW .RAM_AW(`SND_RAMW), `endif .CLR_INT(1)) u_cpu(
     .rst_n      ( ~rst      ),
     .clk        ( clk       ),
-    .cen        ( cen_8     ),
+    .cen        ( cen_8 & ~k39_busy ),
     .cpu_cen    ( cpu_cen   ),
     .int_n      ( int_n     ),
     .nmi_n      ( nmi_n     ),
@@ -138,7 +139,10 @@ jt51 u_jt51(
 );
 
 /* verilator tracing_on */
-jt539 #(.VOLSHIFT(1)) u_k54539(
+// LOCAL VERIFICATION ONLY - swap back to jt539 once jotego answers on the
+// K054539 PR path. The only differences in the instantiation are the added
+// rom_ok handshake and the busy output; every other connection is identical.
+jtmoo_k054539 #(.VOLSHIFT(1)) u_k54539(
     .rst        ( rst       ),
     .clk        ( clk       ),
     .cen        ( cen_pcm   ),
@@ -150,10 +154,12 @@ jt539 #(.VOLSHIFT(1)) u_k54539(
     .cs         ( k39_cs    ),
     .din        ( cpu_dout  ),
     .dout       ( k39_dout  ),
+    .busy       ( k39_busy  ),
     // ROM
     .rom_cs     ( pcm_cs    ),
     .rom_addr   ({nc,pcm_addr}),
     .rom_data   ( pcm_data  ),
+    .rom_ok     ( pcm_ok    ),
     // YM input, AUX1
     .aux_l      ( fm_l      ),
     .aux_r      ( fm_r      ),
