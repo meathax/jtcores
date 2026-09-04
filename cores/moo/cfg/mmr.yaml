@@ -1,3 +1,70 @@
 - include:
     core: rungun
     name: k053252
+
+# E3: register-map documentation for the K054338 colour combiner and K053251
+# priority mixer, so their SD-card/debug dump shows the real register layout
+# instead of only the 3 words (CONTROL/BRI3/PBLEND) the hand-rolled
+# jt054338.v dump_mmr port exposed. Field layout cross-checked against the
+# current cores/moo/hdl/jt054338.v (localparams BGC_R/BGC_GB/SHAD1R/BRI3/
+# PBLEND/CONTROL and the pblend mux) and cores/simson/hdl/jtcolmix_053251.v
+# (mmr[0..12] usage). Neither module is itself a `jtframe mmr` consumer --
+# jt054338.v keeps its own regs[] array (functional path unchanged) and
+# jtcolmix_053251.v is shared with cores/simson and off limits to edit here
+# -- so cores/moo/hdl/jtmoo_colmix.v instantiates the two generated modules
+# below as read-only shadow decoders (same cs/we/addr/data as the real
+# instances) purely to source a complete byte-addressable ioctl_din for the
+# SD-card dump chain (mmr_dump), alongside the existing hand-written palette
+# dump. bri2_lvl/bri3_lvl (register 12) are documented for completeness even
+# though jt054338.v itself only exposes bri1_lvl (deliberate, see commit
+# 63bb1aa "reduce the jt054338 delta to the single bri1_lvl output that
+# colmix uses" -- BRI1 is tied on the board, see jtmoo_colmix.v).
+- name: k054338
+  no_core_name: true
+  size: 32
+  dw: 16
+  regs:
+    - { name: bgc_r,     desc: "background red",                 dw: 8, at: "0x00" }
+    - { name: bgc_g,     desc: "background green",                dw: 8, at: "0x03" }
+    - { name: bgc_b,     desc: "background blue",                 dw: 8, at: "0x02" }
+    - { name: shd1_r,    desc: "shadow code 1 red (signed 9b)",   dw: 9, at: "0x05[0],0x04" }
+    - { name: shd1_g,    desc: "shadow code 1 green (signed 9b)", dw: 9, at: "0x07[0],0x06" }
+    - { name: shd1_b,    desc: "shadow code 1 blue (signed 9b)",  dw: 9, at: "0x09[0],0x08" }
+    - { name: shd2_r,    desc: "shadow code 2 red (signed 9b)",   dw: 9, at: "0x0b[0],0x0a" }
+    - { name: shd2_g,    desc: "shadow code 2 green (signed 9b)", dw: 9, at: "0x0d[0],0x0c" }
+    - { name: shd2_b,    desc: "shadow code 2 blue (signed 9b)",  dw: 9, at: "0x0f[0],0x0e" }
+    - { name: shd3_r,    desc: "shadow code 3 red (signed 9b)",   dw: 9, at: "0x11[0],0x10" }
+    - { name: shd3_g,    desc: "shadow code 3 green (signed 9b)", dw: 9, at: "0x13[0],0x12" }
+    - { name: shd3_b,    desc: "shadow code 3 blue (signed 9b)",  dw: 9, at: "0x15[0],0x14" }
+    - { name: bri1_lvl,  desc: "brightness code 1 (used, BRI1 tied on board)", dw: 8, at: "0x16" }
+    - { name: bri3_lvl,  desc: "brightness code 3 (documented, unused on Moo)", dw: 8, at: "0x18" }
+    - { name: bri2_lvl,  desc: "brightness code 2 (documented, unused on Moo)", dw: 8, at: "0x19" }
+    - { name: mix1_lvl,  desc: "mix code 1 level [4:0]",          dw: 5, at: "0x1a[4:0]" }
+    - { name: mix1_mode, desc: "mix code 1 mode (0=blend,1=add)", dw: 1, at: "0x1a[5]" }
+    - { name: mix3_lvl,  desc: "mix code 3 level [4:0]",          dw: 5, at: "0x1c[4:0]" }
+    - { name: mix3_mode, desc: "mix code 3 mode",                 dw: 1, at: "0x1c[5]" }
+    - { name: mix2_lvl,  desc: "mix code 2 level [4:0]",          dw: 5, at: "0x1d[4:0]" }
+    - { name: mix2_mode, desc: "mix code 2 mode",                 dw: 1, at: "0x1d[5]" }
+    - { name: video_en,  desc: "CONTROL[0], 0 forces background color", dw: 1, at: "0x1e[0]" }
+    - { name: mixpri,    desc: "CONTROL[1], MIX pin input-delay select",   dw: 1, at: "0x1e[1]" }
+    - { name: shdpri,    desc: "CONTROL[2], SHD pin input-delay select",   dw: 1, at: "0x1e[2]" }
+    - { name: brtpri,    desc: "CONTROL[3], BRI pin input-delay select",   dw: 1, at: "0x1e[3]" }
+    - { name: clipsl,    desc: "CONTROL[5], disable output min/max clamp", dw: 1, at: "0x1e[5]" }
+
+- name: k053251
+  no_core_name: true
+  size: 13
+  regs:
+    - { name: pri0_ext, desc: "explicit priority override for CI0", dw: 6, at: "0[5:0]" }
+    - { name: pri1_ext, desc: "explicit priority override for CI1", dw: 6, at: "1[5:0]" }
+    - { name: pri2_ext, desc: "explicit priority override for CI2", dw: 6, at: "2[5:0]" }
+    - { name: pri3,     desc: "priority for CI3 (always used)",     dw: 6, at: "3[5:0]" }
+    - { name: pri4,     desc: "priority for CI4 (always used)",     dw: 6, at: "4[5:0]" }
+    - { name: brit_thr, desc: "brightness-output priority threshold", dw: 6, at: "5[5:0]" }
+    - { name: shd1_pri, desc: "shadow-1 priority threshold",        dw: 6, at: "6[5:0]" }
+    - { name: shd2_pri, desc: "shadow-2 priority threshold",        dw: 6, at: "7[5:0]" }
+    - { name: shd3_pri, desc: "shadow-3 priority threshold",        dw: 6, at: "8[5:0]" }
+    - { name: colhi0,   desc: "CI0/CI1/CI2 colour high-bit bank select (2b each)", dw: 6, at: "9[5:0]" }
+    - { name: colhi3,   desc: "CI3/CI4 colour high-bit bank select (3b each)",     dw: 6, at: "10[5:0]" }
+    - { name: full_en,  desc: "bit[4:0]: full 8-bit-colour (vs 4-bit) enable per CIx; bit5: sel override", dw: 6, at: "11[5:0]" }
+    - { name: exten,    desc: "bit[2:0]: use pri0_ext/pri1_ext/pri2_ext instead of the module's pri0..2 inputs", dw: 6, at: "12[5:0]" }

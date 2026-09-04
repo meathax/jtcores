@@ -49,14 +49,17 @@ module jtmoo_colmix(
     input      [ 7:0] debug_bus
 );
 
-wire [23:0] k338_bg, k338_dump;
+wire [23:0] k338_bg;
 wire [15:0] k338_dout;
 wire [10:0] col, pal_addr, cpu_pal_addr;
 wire [ 8:0] ci0, ci1, ci2;
-wire [ 7:0] ci3, ci4, k251_dump, alpha_level, bri1_lvl,
-            pal_r, pal_g, pal_b, cpu_r, cpu_g, cpu_b, k338_byte;
+wire [ 7:0] ci3, ci4, alpha_level, bri1_lvl,
+            pal_r, pal_g, pal_b, cpu_r, cpu_g, cpu_b,
+            k338g_dump, k251g_dump;
 wire [ 5:0] pri0;
-wire [ 1:0] shd_out, mcol_shd, k338_byte_sel;
+wire [ 4:0] k338g_addr;
+wire [ 3:0] k251g_addr;
+wire [ 1:0] shd_out, mcol_shd;
 wire        pcu_we, reg_we, col_n, k338_video_en, clipsl, alpha_add, pblend0,
             brit, wr_r, wr_g, wr_b, pal_word, p0_opaque, mcol_blank, mcol_bri,
             k338_dump_sel;
@@ -98,18 +101,29 @@ assign mcol_bri   = p0_opaque ? 1'b0 : brit;
 assign pal_addr   = ioctl_ram ? {1'b0,ioctl_addr[11:2]} :
                     ph        ? {3'b111,lyrf_l[7:0]}    : col;
 
-// K054338 dump: CONTROL/brightness/PBLEND on ioctl_addr[4] or debug_bus[7]
+// K054338/K053251 register dump (E3): bit4 of ioctl_addr (or debug_bus[7])
+// selects the chip; jtk054338_mmr and jtk053251_mmr below are read-only
+// shadow decoders (E3) fed the same cs/we/addr/data as the real jt054338/
+// u_k251 instances further down -- they do not affect chip behaviour, they
+// only mirror the register writes into a generated, fully byte-addressable
+// register file so every register (not just the 3 words the old hand-rolled
+// jt054338 dump_mmr port exposed) reaches the SD-card dump.
 assign k338_dump_sel = ioctl_ram ? ioctl_addr[4]   : debug_bus[7];
-assign k338_byte_sel = ioctl_ram ? ioctl_addr[1:0] : debug_bus[1:0];
-assign k338_byte     = k338_byte_sel==2'd0 ? k338_dump[23:16] :
-                       k338_byte_sel==2'd1 ? k338_dump[15:8]  : k338_dump[7:0];
-assign mmr_dump      = k338_dump_sel ? k338_byte : k251_dump;
+assign k338g_addr    = ioctl_ram ? ioctl_addr[9:5] : debug_bus[4:0];
+assign k251g_addr    = ioctl_ram ? ioctl_addr[3:0] : debug_bus[3:0];
+assign mmr_dump      = k338_dump_sel ? k338g_dump : k251g_dump;
 
 // CLIPSL disables the clamp, the sum wraps instead
 function [7:0] add_clip(input [7:0] cin, input signed [9:0] delta, input noclip);
     reg signed [10:0] sum;
 begin
-    sum = {3'd0,cin} + delta;
+    // $signed() on the concatenation is required: an unsigned concatenation
+    // operand forces the whole RHS to unsigned arithmetic, which would
+    // zero-extend (instead of sign-extend) a negative `delta`, corrupting
+    // every clamp decision for negative shadow deltas (found by directed
+    // bench 2026-09-04, session 7: cin=10,delta=-50 clamped to 8'hff
+    // instead of 8'h00).
+    sum = $signed({3'd0,cin}) + delta;
     add_clip = noclip          ? sum[7:0] :
                sum < 0         ? 8'd0  :
                sum > 11'sd255  ? 8'hff : sum[7:0];
@@ -224,7 +238,7 @@ jt054338 u_k338(
     .shdpri      (                 ),
     .brtpri      (                 ),
     .clipsl      ( clipsl          ),
-    .dump_mmr    ( k338_dump       ),
+    .dump_mmr    (                 ), // superseded by u_k338g's full dump (E3)
     .bri1_lvl    ( bri1_lvl        ),
 
     .shadow_r    ( shad_r          ),
@@ -254,13 +268,65 @@ jtcolmix_053251 u_k251(
     // shadow
     .shd_in     ( shadow    ),
     .shd_out    ( shd_out   ),
-    // dump to SD card
+    // dump to SD card (own hand-rolled path, superseded by u_k251g, E3)
     .ioctl_addr ( ioctl_ram ? ioctl_addr[3:0] : debug_bus[3:0] ),
-    .ioctl_din  ( k251_dump ),
+    .ioctl_din  (           ),
 
     .cout       ( col       ),
     .brit       ( brit      ),
     .col_n      ( col_n     )
+);
+
+// E3: generated (jtframe mmr) read-only shadow register files, fed the same
+// CPU-side cs/we/addr/data as the real u_k338/u_k251 instances above. They
+// do not drive any chip behaviour -- only their ioctl_din feeds mmr_dump so
+// every K054338/K053251 register (not just the 3 words the old hand-rolled
+// dump exposed) reaches the SD-card dump. See cfg/mmr.yaml.
+jtk054338_mmr u_k338g(
+    .rst        ( rst        ),
+    .clk        ( clk        ),
+
+    .cs         ( reg_cs     ),
+    .addr       ( cpu_addr[4:1] ),
+    .rnw        ( ~cpu_we    ),
+    .din        ( cpu_dout   ),
+    .dout       (            ),
+    .dsn        ( cpu_dsn    ),
+
+    .bgc_r      (), .bgc_g (), .bgc_b (),
+    .shd1_r (), .shd1_g (), .shd1_b (),
+    .shd2_r (), .shd2_g (), .shd2_b (),
+    .shd3_r (), .shd3_g (), .shd3_b (),
+    .bri1_lvl (), .bri2_lvl (), .bri3_lvl (),
+    .mix1_lvl (), .mix1_mode (),
+    .mix2_lvl (), .mix2_mode (),
+    .mix3_lvl (), .mix3_mode (),
+    .video_en (), .mixpri (), .shdpri (), .brtpri (), .clipsl (),
+
+    .ioctl_addr ( k338g_addr ),
+    .ioctl_din  ( k338g_dump ),
+    .debug_bus  ( debug_bus  ),
+    .st_dout    (            )
+);
+
+jtk053251_mmr u_k251g(
+    .rst        ( rst        ),
+    .clk        ( clk        ),
+
+    .cs         ( pcu_we     ),
+    .addr       ( cpu_addr[4:1] ),
+    .rnw        ( ~cpu_we    ),
+    .din        ( {2'd0,cpu_dout[5:0]} ),
+    .dout       (            ),
+
+    .pri0_ext (), .pri1_ext (), .pri2_ext (), .pri3 (), .pri4 (),
+    .brit_thr (), .shd1_pri (), .shd2_pri (), .shd3_pri (),
+    .colhi0 (), .colhi3 (), .full_en (), .exten (),
+
+    .ioctl_addr ( k251g_addr ),
+    .ioctl_din  ( k251g_dump ),
+    .debug_bus  ( debug_bus  ),
+    .st_dout    (            )
 );
 
 jtframe_dual_ram #(.AW(11),.SIMFILE("pal_g.bin")) u_pal_g(
