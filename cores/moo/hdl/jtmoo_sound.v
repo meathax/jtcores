@@ -129,11 +129,12 @@ jt51 u_jt51(
     .ct2        (           ),
     .irq_n      ( fm_intn   ),
     .sample     (           ),
-    .left       (           ),
-    .right      (           ),
-    // Full resolution output
-    .xleft      ( fm_l      ),
-    .xright     ( fm_r      )
+    // board feeds the YM2151 serial DAC stream (SO, pin 21) into the
+    // K054539 AUX input, not the full-resolution internal accumulator
+    .left       ( fm_l      ),
+    .right      ( fm_r      ),
+    .xleft      (           ),
+    .xright     (           )
 );
 
 /* verilator tracing_on */

@@ -216,7 +216,8 @@ assign ommra = {cpu_addr[3:1],cpu_dsn[1]};
 assign orama = {cpu_addr[15:8], cpu_addr[5:1]}; // A6/A7 not connected
 
 /* verilator tracing_on */
-jtsimson_obj #(.RAMW(13),.SHADOW(1),.ESTRIDE_LOG2(5),.ENTRY_LOG2(8)) u_obj(
+jtsimson_obj #(.RAMW(13),.SHADOW(1),.ESTRIDE_LOG2(5),.ENTRY_LOG2(8),
+    .HOFFSET(10'h3d1)) u_obj(          // MAME set_config(..., -48+1, 23): dx=-47
     .rst        ( rst       ),
     .clk        ( clk       ),
     .pxl_cen    ( pxl_cen   ),
@@ -224,7 +225,7 @@ jtsimson_obj #(.RAMW(13),.SHADOW(1),.ESTRIDE_LOG2(5),.ENTRY_LOG2(8)) u_obj(
     .simson     ( 1'b0      ),
     .ln_done    (           ),
 
-    .voffset    ( 10'd0     ),
+    .voffset    ( 10'd23    ),        // MAME dy=23
     // Base Video (inputs)
     .hs         ( hs        ),
     .lvbl       ( lvbl      ),
