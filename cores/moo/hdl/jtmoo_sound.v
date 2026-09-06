@@ -50,6 +50,10 @@ wire [ 2:0] nc;
 reg  [ 6:0] k21_vol;    // 0..64, 40 = unity, MAME k054321.cpp:99-113
 reg  [ 2:0] vol_dec;    // k21_vol/10
 reg  [ 3:0] vol_frac;   // k21_vol%10
+// pair_we is a level held for the whole 68000 bus cycle (jtmoo_main.v:109), so
+// the up counter must see one edge per write, not one per clock
+reg         pair_we_l;
+wire        pair_wr = pair_we & ~pair_we_l;
 
 assign latch_we = k21_cs && !wr_n;
 assign rom_hi   = A[15] ? bank : {3'd0, A[14]};
@@ -89,10 +93,13 @@ end
 // the written data is non zero (MAME k054321.cpp:44-45,99-113)
 always @(posedge clk, posedge rst) begin
     if( rst ) begin
-        k21_vol  <= 0;
-        vol_dec  <= 0;
-        vol_frac <= 0;
-    end else if( pair_we ) case( main_addr )
+        k21_vol   <= 0;
+        vol_dec   <= 0;
+        vol_frac  <= 0;
+        pair_we_l <= 0;
+    end else begin
+        pair_we_l <= pair_we;
+        if( pair_wr ) case( main_addr )
         4'd2: begin k21_vol <= 0; vol_dec <= 0; vol_frac <= 0; end
         4'd3: if( |main_dout && k21_vol!=7'd64 ) begin
             k21_vol <= k21_vol+7'd1;
@@ -104,7 +111,8 @@ always @(posedge clk, posedge rst) begin
             end
         end
         default:;
-    endcase
+        endcase
+    end
 end
 
 // gain = 2^((vol-40)/10) = (2^((vol%10)/10) << (vol/10)) >> 4, Q16
