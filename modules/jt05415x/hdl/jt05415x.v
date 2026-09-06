@@ -57,6 +57,9 @@ localparam signed [12:0] HOFSA =  13'sd1,
                          HOFSD = -13'sd7;
 // jtframe_tilemap requests a tile one group before it is displayed
 localparam [12:0] PREFETCH = 13'd8;
+// screen column c is bitmap x c+40 (moo.cpp set_visarea); hdump's first visible
+// pixel is 56, jtframe_tilemap adds 9 pixels of latency and the mixer 3
+localparam signed [12:0] HBASE = 13'sd40 - 13'sd56 + 13'sd9 + 13'sd3;
 
 wire [15:0] dout_156, dout_157, dout_mmr, romrd_dout, vram_dout;
 wire [ 7:0] ioctl_156_din, ioctl_157_din;
@@ -301,13 +304,13 @@ wire [11:0] f_ysum, a_ysum, b_ysum, c_ysum;
 wire [ 8:0] f_heff, a_heff, b_heff, c_heff;
 wire [ 8:0] f_veff, a_veff, b_veff, c_veff;
 
-assign f_xsum = {4'd0,hdump} + HOFSA + {1'b0,lnscr_ctrl[0] ? a_scrx : lyrf_lnscr} +
+assign f_xsum = {4'd0,hdump} + HBASE + HOFSA + {1'b0,lnscr_ctrl[0] ? a_scrx : lyrf_lnscr} +
                 (glob_ctrl[4] ? hflip_corr_ext : 13'd0);
-assign a_xsum = {4'd0,hdump} + HOFSB + {1'b0,lnscr_ctrl[2] ? b_scrx : lyra_lnscr} +
+assign a_xsum = {4'd0,hdump} + HBASE + HOFSB + {1'b0,lnscr_ctrl[2] ? b_scrx : lyra_lnscr} +
                 (glob_ctrl[4] ? hflip_corr_ext : 13'd0);
-assign b_xsum = {4'd0,hdump} + HOFSC + {1'b0,lnscr_ctrl[4] ? c_scrx : lyrb_lnscr} +
+assign b_xsum = {4'd0,hdump} + HBASE + HOFSC + {1'b0,lnscr_ctrl[4] ? c_scrx : lyrb_lnscr} +
                 (glob_ctrl[4] ? hflip_corr_ext : 13'd0);
-assign c_xsum = {4'd0,hdump} + HOFSD + {1'b0,lnscr_ctrl[6] ? d_scrx : lyrc_lnscr} +
+assign c_xsum = {4'd0,hdump} + HBASE + HOFSD + {1'b0,lnscr_ctrl[6] ? d_scrx : lyrc_lnscr} +
                 (glob_ctrl[4] ? hflip_corr_ext : 13'd0);
 
 // first visible line is vdump 0x110 = tilemap row 16 (moo.cpp set_visarea)
