@@ -45,9 +45,8 @@ wire        m1_n, mreq_n, rd_n, wr_n, iorq_n, rfsh_n, nmi_n,
 reg         ram_cs, fm_cs, k39_cs, k21_cs, bank_we, mem_acc, nmi_clr, bank_we_l;
 wire signed [15:0] fm_l, fm_r, pcm_l, pcm_r;
 wire [ 2:0] nc;
-// K054321 global volume (054986A U2, in series with the AD1868). The counter
-// lives here rather than in the shared jt054321.v because that module cannot
-// gain audio ports without raising PINMISSING in rungun/xmen
+// Board-local K054321 volume stage, in series with the AD1868;
+// the shared latch module keeps its existing interface.
 reg  [ 6:0] k21_vol;    // 0..64, 40 = unity, MAME k054321.cpp:99-113
 reg  [ 2:0] vol_dec;    // k21_vol/10
 reg  [ 3:0] vol_frac;   // k21_vol%10

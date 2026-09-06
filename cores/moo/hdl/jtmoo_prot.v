@@ -32,6 +32,7 @@ module jtmoo_prot(
     input                BGn,
     output reg           BGACKn
 );
+// Legacy switch retained for protection-disabled builds.
 `ifndef NOTMNT2
 reg  [15:0] mmr[0:15];
 reg  [23:1] a, p1, p2, pd;
@@ -83,16 +84,47 @@ always @(posedge clk) begin
                 cnt <= mmr[15];
                 st  <= 1;
             end
-            1: begin BRn <= 0; bus_asn <= 1; bus_wrn <= 1; if( !BGn ) st <= 2; end
-            2: begin BGACKn <= 0; st <= cnt==16'd0 ? 4'd9 : 4'd3; end
+            1: begin
+                BRn <= 0;
+                bus_asn <= 1;
+                bus_wrn <= 1;
+                if( !BGn ) st <= 2;
+            end
+            2: begin
+                BGACKn <= 0;
+                st <= cnt==16'd0 ? 4'd9 : 4'd3;
+            end
             // src1
-            3: begin a <= p1; bus_wrn <= 1; bus_asn <= 0; if( !dtack_n ) st <= 4; end
-            4: begin va <= bus_dout; bus_asn <= 1; st <= 5; end
+            3: begin
+                a <= p1;
+                bus_wrn <= 1;
+                bus_asn <= 0;
+                if( !dtack_n ) st <= 4;
+            end
+            4: begin
+                va <= bus_dout;
+                bus_asn <= 1;
+                st <= 5;
+            end
             // src2
-            5: begin a <= p2; bus_asn <= 0; if( !dtack_n ) st <= 6; end
-            6: begin res <= va + { bus_dout[14:0], 1'b0 }; bus_asn <= 1; st <= 7; end
+            5: begin
+                a <= p2;
+                bus_asn <= 0;
+                if( !dtack_n ) st <= 6;
+            end
+            6: begin
+                res <= va + { bus_dout[14:0], 1'b0 };
+                bus_asn <= 1;
+                st <= 7;
+            end
             // dst
-            7: begin a <= pd; bus_din <= res; bus_wrn <= 0; bus_asn <= 0; if( !dtack_n ) st <= 8; end
+            7: begin
+                a <= pd;
+                bus_din <= res;
+                bus_wrn <= 0;
+                bus_asn <= 0;
+                if( !dtack_n ) st <= 8;
+            end
             8: begin
                 bus_asn <= 1;
                 bus_wrn <= 1;
@@ -102,8 +134,16 @@ always @(posedge clk) begin
                 cnt <= cnt-16'd1;
                 st  <= cnt==16'd1 ? 4'd9 : 4'd3;
             end
-            9: begin BRn <= 1; bus_asn <= 1; bus_wrn <= 1; if( BGn ) st <= 10; end
-           10: begin BGACKn <= 1; st <= 0; end
+            9: begin
+                BRn <= 1;
+                bus_asn <= 1;
+                bus_wrn <= 1;
+                if( BGn ) st <= 10;
+            end
+           10: begin
+               BGACKn <= 1;
+               st <= 0;
+           end
            default: st <= 0;
         endcase
     end

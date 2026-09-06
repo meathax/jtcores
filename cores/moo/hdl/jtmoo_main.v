@@ -317,7 +317,7 @@ jtframe_m68k u_cpu(
     .FC         ( FC          ),
 
     .BERRn      ( 1'b1        ),
-    // Bus arbitrion
+    // Bus arbitration
     .HALTn      ( HALTn       ),
     .BRn        ( prot_brn    ),
     .BGACKn     ( prot_bgackn ),

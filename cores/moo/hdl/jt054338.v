@@ -62,9 +62,9 @@ wire [ 3:0] shd_base = shadow == 2'd2 ? SHAD1R + 4'd3 :
 wire [ 8:0] shd_r9   = shadow == 0 ? 9'd0  : regs[shd_base     ][8:0];
 wire [ 8:0] shd_g9   = shadow == 0 ? 9'd0  : regs[shd_base+4'd1][8:0];
 wire [ 8:0] shd_b9   = shadow == 0 ? 9'd0  : regs[shd_base+4'd2][8:0];
-wire [ 7:0] mixset   = pblend == 0 ? 8'h1f :
-                       pblend[0]   ? regs[PBLEND + {3'd0,pblend[1]}][ 7:0] :
-                                     regs[PBLEND + {3'd0,pblend[1]}][15:8];
+wire [ 5:0] mixset   = pblend == 0 ? 6'h1f :
+                       pblend[0]   ? regs[PBLEND + {3'd0,pblend[1]}][ 5:0] :
+                                     regs[PBLEND + {3'd0,pblend[1]}][13:8];
 wire [ 4:0] mixlv    = ALPHA_INV ? ~mixset[4:0] : mixset[4:0];
 
 assign dout        = regs[addr];
