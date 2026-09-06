@@ -26,6 +26,14 @@ module jtmoo_colmix(
     input      [12:1] cpu_addr,
     output     [15:0] cpu_din,
 
+    // Palette RAM, generated from cfg/mem.yaml
+    output     [ 3:0] pal_we,
+    output     [12:2] pal_addr,
+    output     [31:0] pal_din,
+    input      [31:0] pal_dout,
+    output     [12:2] palrd_addr,
+    input      [31:0] pal_data,
+
     // Final pixels
     input      [11:0] lyrf_pxl, // plane 0, bypasses the K053251
     input      [11:0] lyra_pxl, // plane 1 -> CI2
@@ -51,7 +59,7 @@ module jtmoo_colmix(
 
 wire [23:0] k338_bg;
 wire [15:0] k338_dout;
-wire [10:0] col, pal_addr, cpu_pal_addr;
+wire [10:0] col, vid_pal_addr, cpu_pal_addr;
 wire [ 8:0] ci0, ci1, ci2;
 wire [ 7:0] ci3, ci4, alpha_level, bri1_lvl,
             pal_r, pal_g, pal_b, cpu_r, cpu_g, cpu_b,
@@ -98,8 +106,20 @@ assign mcol_blank = p0_opaque ? 1'b0 : col_n;
 assign mcol_shd   = p0_opaque ? 2'b0 : shd_out;
 assign mcol_bri   = p0_opaque ? 1'b0 : brit;
 // plane 0 reads the palette on the odd clock cycles, bank 0x700-0x7FF
-assign pal_addr   = ioctl_ram ? ioctl_addr[12:2] :
+assign vid_pal_addr = ioctl_ram ? ioctl_addr[12:2] :
                     ph        ? {3'b111,lyrf_l[7:0]}    : col;
+
+// palette RAM port 0 is the CPU, port 1 the video/ioctl read
+assign pal_addr   = cpu_pal_addr;
+assign pal_we     = { 1'b0, wr_b, wr_g, wr_r };
+assign pal_din     = { 8'd0, cpu_dout[7:0], cpu_dout[15:8], cpu_dout[7:0] };
+assign palrd_addr = vid_pal_addr;
+assign cpu_r      = pal_dout[ 7:0];
+assign cpu_g      = pal_dout[15:8];
+assign cpu_b      = pal_dout[23:16];
+assign pal_r      = pal_data[ 7:0];
+assign pal_g      = pal_data[15:8];
+assign pal_b      = pal_data[23:16];
 
 // Version 1 dump allocates separate aligned blocks to the two chips.
 assign k338_dump_sel = ioctl_ram ? ioctl_addr[5]   : debug_bus[7];
@@ -265,45 +285,6 @@ jtcolmix_053251 u_k251(
     .cout       ( col       ),
     .brit       ( brit      ),
     .col_n      ( col_n     )
-);
-
-jtframe_dual_ram #(.AW(11),.SIMFILE("pal_g.bin")) u_pal_g(
-    .clk0   ( clk           ),
-    .data0  ( cpu_dout[15:8]),
-    .addr0  ( cpu_pal_addr  ),
-    .we0    ( wr_g          ),
-    .q0     ( cpu_g         ),
-    .clk1   ( clk           ),
-    .data1  ( 8'd0          ),
-    .addr1  ( pal_addr      ),
-    .we1    ( 1'b0          ),
-    .q1     ( pal_g         )
-);
-
-jtframe_dual_ram #(.AW(11),.SIMFILE("pal_r.bin")) u_pal_r(
-    .clk0   ( clk           ),
-    .data0  ( cpu_dout[7:0] ),
-    .addr0  ( cpu_pal_addr  ),
-    .we0    ( wr_r          ),
-    .q0     ( cpu_r         ),
-    .clk1   ( clk           ),
-    .data1  ( 8'd0          ),
-    .addr1  ( pal_addr      ),
-    .we1    ( 1'b0          ),
-    .q1     ( pal_r         )
-);
-
-jtframe_dual_ram #(.AW(11),.SIMFILE("pal_b.bin")) u_pal_b(
-    .clk0   ( clk           ),
-    .data0  ( cpu_dout[7:0] ),
-    .addr0  ( cpu_pal_addr  ),
-    .we0    ( wr_b          ),
-    .q0     ( cpu_b         ),
-    .clk1   ( clk           ),
-    .data1  ( 8'd0          ),
-    .addr1  ( pal_addr      ),
-    .we1    ( 1'b0          ),
-    .q1     ( pal_b         )
 );
 
 `ifdef SIMULATION

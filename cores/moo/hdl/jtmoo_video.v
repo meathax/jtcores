@@ -27,8 +27,16 @@ module jtmoo_video(
     input             pcu_cs,
     input             k338_cs,
     input             pal_cs,
-    output     [15:0] pal_dout,
+    output     [15:0] palsys_dout,
     output     [15:0] tilesys_dout,
+
+    // Palette RAM, generated from cfg/mem.yaml
+    output     [ 3:0] pal_we,
+    output     [12:2] pal_addr,
+    output     [31:0] pal_din,
+    input      [31:0] pal_dout,
+    output     [12:2] palrd_addr,
+    input      [31:0] pal_data,
 
     input             cco_cs,
     input             rw,
@@ -274,12 +282,20 @@ jtmoo_colmix u_colmix(
     // CPU interface
     .cpu_addr   (cpu_addr[12:1]),
     .cpu_we     ( cpu_weg   ),
-    .cpu_din    ( pal_dout  ),
+    .cpu_din    ( palsys_dout ),
     .cpu_dout   ( cpu_dout  ),
     .cpu_dsn    ( cpu_dsn   ),
     .pal_cs     ( pal_cs    ),
     .pcu_cs     ( pcu_cs    ),
     .reg_cs     ( k338_cs   ),
+
+    // Palette RAM pass-through
+    .pal_we     ( pal_we      ),
+    .pal_addr   ( pal_addr    ),
+    .pal_din    ( pal_din     ),
+    .pal_dout   ( pal_dout    ),
+    .palrd_addr ( palrd_addr  ),
+    .pal_data   ( pal_data    ),
 
     // Final pixels
     .lyrf_pxl   ( lyrf_pxl  ),

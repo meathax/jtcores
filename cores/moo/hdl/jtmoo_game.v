@@ -15,7 +15,7 @@ wire        snd_irq, rmrd_cs, dma_bsy,
             objreg_cs, scrreg_cs, scr_cs, pair_we, cco_cs, rw, int1;
 wire [ 1:0] oram_we;
 wire [ 7:0] vtimer_mmr;
-wire [15:0] pal_dout, oram_dout;
+wire [15:0] palsys_dout, oram_dout;
 wire [15:0] video_dumpa;
 reg  [ 7:0] debug_mux;
 wire [15:0] tilesys_dout;
@@ -67,7 +67,7 @@ jtmoo_main u_main(
 
     .vram_dout      ( tilesys_dout  ),
     .oram_dout      ( oram_dout     ),
-    .pal_dout       ( pal_dout      ),
+    .pal_dout       ( palsys_dout   ),
     // To video
     .rmrd_cs        ( rmrd_cs       ),
     .dma_bsy        ( dma_bsy       ),
@@ -135,7 +135,14 @@ jtmoo_video u_video (
     .rmrd_cs        ( rmrd_cs       ),
     .tilesys_dout   ( tilesys_dout  ),
     .objsys_dout    ( oram_dout     ),
+    .palsys_dout    ( palsys_dout   ),
+    // Palette RAM, generated from cfg/mem.yaml
+    .pal_we         ( pal_we        ),
+    .pal_addr       ( pal_addr      ),
+    .pal_din        ( pal_din       ),
     .pal_dout       ( pal_dout      ),
+    .palrd_addr     ( palrd_addr    ),
+    .pal_data       ( pal_data      ),
 
     .int1           ( int1          ),
     .cco_cs         ( cco_cs        ),
