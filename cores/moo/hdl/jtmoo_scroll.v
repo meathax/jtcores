@@ -53,13 +53,7 @@ wire [7:0] st_156, st_157;
 wire       rnw, blankn;
 
 assign rnw     = ~cpu_we;
-// blankn only suppresses the tile-graphics fetch (jtframe_tilemap's rom_cs).
-// The 054157 must have the first pixel of a line ready when the active window
-// opens, so the fetch cannot pause for the horizontal blank: pausing left the
-// 8-pixel pipeline unprimed and painted the leading columns of every line
-// black (worklist B20). The vertical gate is kept -- nothing is displayed
-// during VBLANK and the layers reach the active area with a whole HBLANK to
-// prime -- so the fetch still idles for 40 lines a frame.
+// tile fetch runs through HBLANK so the first group of each line is primed
 assign blankn  = lvbl;
 assign st_dout = debug_bus[0] ? st_157 : st_156;
 
