@@ -67,16 +67,15 @@ wire [ 7:0] ci3, ci4, alpha_level, bri1_lvl,
 wire [ 5:0] pri0;
 wire [ 4:0] k338g_addr;
 wire [ 3:0] k251g_addr;
-wire [ 1:0] shd_out, mcol_shd;
+wire [ 1:0] shd_out, shd_a;
 wire        pcu_we, reg_we, col_n, k338_video_en, clipsl, alpha_add, pblend0,
-            brit, wr_r, wr_g, wr_b, pal_word, p0_opaque, mcol_blank, mcol_bri,
-            k338_dump_sel;
+            brit, wr_r, wr_g, wr_b, pal_word, p0_opaque, blank_a, bri_a,
+            blend_a, k338_dump_sel;
 wire signed [9:0] shad_r, shad_g, shad_b;
 reg  [23:0] bgr;
 reg  [11:0] lyrf_l;
 reg  [ 7:0] r8, g8, b8, fr8, fg8, fb8;
-reg  [ 1:0] shd_l;
-reg         blank_l, fixop_a, blend_a, bri_l, ph, ph_l;
+reg         fixop_a, ph, ph_l;
 
 // palette is xRGB_888, big endian: even word = R, odd word = {G,B}
 assign pal_word     = cpu_addr[1];
@@ -102,9 +101,12 @@ assign ci4       = lyrc_pxl[7:0];
 assign pblend0    = col[8] & ~col[9] & ~col[10];
 // opaque plane 0 wins unless MIX0 selects blending with the K053251 winner
 assign p0_opaque  = |lyrf_l[3:0];
-assign mcol_blank = p0_opaque ? 1'b0 : col_n;
-assign mcol_shd   = p0_opaque ? 2'b0 : shd_out;
-assign mcol_bri   = p0_opaque ? 1'b0 : brit;
+// col and col_n leave the K053251 together and the palette read costs less
+// than a pixel, so these take no pxl_cen of their own. fixop_a matches them.
+assign blank_a    = fixop_a ? 1'b0 : col_n;
+assign shd_a      = fixop_a ? 2'b0 : shd_out;
+assign bri_a      = fixop_a ? 1'b0 : brit;
+assign blend_a    = fixop_a & pblend0;
 // plane 0 reads the palette on the odd clock cycles, bank 0x700-0x7FF
 assign vid_pal_addr = ioctl_ram ? ioctl_addr[12:2] :
                     ph        ? {3'b111,lyrf_l[7:0]}    : col;
@@ -176,11 +178,7 @@ endfunction
 always @(posedge clk, posedge rst) begin
     if( rst ) begin
         bgr     <= 0;
-        shd_l   <= 0;
-        blank_l <= 0;
         fixop_a <= 0;
-        blend_a <= 0;
-        bri_l   <= 0;
         lyrf_l  <= 0;
         {r8,g8,b8}    <= 0;
         {fr8,fg8,fb8} <= 0;
@@ -195,22 +193,18 @@ always @(posedge clk, posedge rst) begin
             { r8,  g8,  b8  } <= { pal_r, pal_g, pal_b };
         if( pxl_cen ) begin
             lyrf_l  <= lyrf_pxl;
-            shd_l   <= mcol_shd;
-            blank_l <= mcol_blank;
-            bri_l   <= mcol_bri;
             fixop_a <= p0_opaque;
-            blend_a <= p0_opaque & pblend0;
             bgr     <= apply_bright( !k338_video_en   ? 24'd0 :
-                       blank_l          ? {k338_bg[7:0],k338_bg[15:8],k338_bg[23:16]} :
+                       blank_a          ? {k338_bg[7:0],k338_bg[15:8],k338_bg[23:16]} :
                        fixop_a & ~blend_a ? { fb8, fg8, fr8 } :
                        fixop_a &  blend_a ? { mix_blend(fb8,b8,alpha_level,alpha_add),
                                                mix_blend(fg8,g8,alpha_level,alpha_add),
                                                mix_blend(fr8,r8,alpha_level,alpha_add) } :
-                       ~|shd_l          ? { b8, g8, r8 } :
+                       ~|shd_a          ? { b8, g8, r8 } :
                                         { add_clip(b8,shad_b,clipsl),
                                           add_clip(g8,shad_g,clipsl),
                                           add_clip(r8,shad_r,clipsl) },
-                       bri_l, bri1_lvl );
+                       bri_a, bri1_lvl );
         end
     end
 end
@@ -237,7 +231,7 @@ jt054338 u_k338(
     .dout        ( k338_dout       ),
 
     .pblend      ( { 1'b0, pblend0 } ),
-    .shadow      ( shd_l           ),
+    .shadow      ( shd_a           ),
 
     .bg_rgb      ( k338_bg         ),
     .alpha_level ( alpha_level     ),
