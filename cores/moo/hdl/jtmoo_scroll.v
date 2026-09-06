@@ -56,7 +56,7 @@ assign rnw     = ~cpu_we;
 assign blankn  = lvbl & lhbl;
 assign st_dout = debug_bus[0] ? st_157 : st_156;
 
-jt05415x u_05415x(
+jt05415x #(.SIMFILE156("scr_mmr.bin"),.SIMFILE157("gfx_mmr.bin")) u_05415x(
     .rst          ( rst            ),
     .clk          ( clk            ),
     .pxl_cen      ( pxl_cen        ),

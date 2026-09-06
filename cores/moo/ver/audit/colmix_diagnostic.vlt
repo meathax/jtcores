@@ -1,0 +1,23 @@
+`verilator_config
+lint_off -rule EOFNEWLINE -file "*jtcolmix_053251.v" -lines 177
+lint_off -rule PINCONNECTEMPTY -file "*jtmoo_colmix.v" -lines 227
+lint_off -rule PINCONNECTEMPTY -file "*jtmoo_colmix.v" -lines 228
+lint_off -rule PINCONNECTEMPTY -file "*jtmoo_colmix.v" -lines 229
+lint_off -rule DECLFILENAME -file "*jtframe_dual_ram.v" -lines 84
+lint_off -rule UNUSEDSIGNAL -file "*jtmoo_colmix.v" -lines 31
+lint_off -rule UNUSEDSIGNAL -file "*jtmoo_colmix.v" -lines 32
+lint_off -rule UNUSEDSIGNAL -file "*jtmoo_colmix.v" -lines 33
+lint_off -rule UNUSEDSIGNAL -file "*jtmoo_colmix.v" -lines 49
+lint_off -rule UNUSEDSIGNAL -file "*jtmoo_colmix.v" -lines 68
+lint_off -rule UNUSEDSIGNAL -file "*jtmoo_colmix.v" -lines 128
+lint_off -rule UNUSEDSIGNAL -file "*jtmoo_colmix.v" -lines 129
+lint_off -rule UNUSEDSIGNAL -file "*jtmoo_colmix.v" -lines 142
+lint_off -rule UNUSEDSIGNAL -file "*jt054338.v" -lines 51
+lint_off -rule UNUSEDPARAM -file "*jtframe_dual_ram.v" -lines 85
+lint_off -rule UNUSEDPARAM -file "*jtframe_dual_ram.v" -lines 86
+lint_off -rule UNUSEDPARAM -file "*jtframe_dual_ram.v" -lines 89
+lint_off -rule UNUSEDPARAM -file "*jtframe_dual_ram.v" -lines 117
+lint_off -rule UNUSEDPARAM -file "*jtframe_dual_ram.v" -lines 123
+lint_off -rule UNUSEDSIGNAL -file "*jtframe_dual_ram.v" -lines 144
+lint_off -rule UNUSEDSIGNAL -file "*jtframe_dual_ram.v" -lines 145
+lint_off -rule UNUSEDSIGNAL -file "*jtframe_dual_ram.v" -lines 146

@@ -1,1 +1,2 @@
-../../../riders/ver/game/dump_split.sh
+#!/bin/bash
+exec python "$(dirname -- "${BASH_SOURCE[0]}")/scene.py" "$@"

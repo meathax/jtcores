@@ -23,7 +23,7 @@ SND_RAMW=13
 
 # default EEPROM needed to prevent game from booting upside down with error
 JTFRAME_IOCTL_RD=128
-debug JTFRAME_IOCTL_RD+=36897
+debug JTFRAME_IOCTL_RD+=49392
 
 [mist|sidi]
 # not enough BRAM

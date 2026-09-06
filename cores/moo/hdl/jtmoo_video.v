@@ -95,7 +95,7 @@ wire [ 8:0] hdump, vdump, lyro_pxl;
 wire [ 7:0] dump_scr, st_scr, dump_obj, scr_mmr, obj_mmr, dump_pal, pal_mmr, ccu_mmr;
 wire [ 4:0] lyro_pri;
 wire [ 1:0] shadow;
-wire [ 3:0] obj_amsb, ommra;
+wire [ 3:0] ommra;
 wire [13:1] orama;
 wire        cpu_weg;
 
@@ -103,7 +103,7 @@ assign cpu_weg = cpu_we && cpu_dsn!=2'b11;
 // The read-back steals the first tile ROM port, so the CPU waits for it
 assign vdtac   = lyrf_ok;
 
-jtriders_dump #(.FULLRAM(1)) u_dump(
+jtmoo_dump u_dump(
     .clk            ( clk             ),
     .dump_scr       ( dump_scr        ),
     .dump_obj       ( dump_obj        ),
@@ -111,13 +111,10 @@ jtriders_dump #(.FULLRAM(1)) u_dump(
     .pal_mmr        ( pal_mmr         ),
     .scr_mmr        ( scr_mmr         ),
     .obj_mmr        ( obj_mmr         ),
-    .psac_mmr       ( 8'b0            ),
-    .other          ( ccu_mmr         ),
+    .ccu_mmr        ( ccu_mmr         ),
 
     .ioctl_addr     ( ioctl_addr      ),
     .ioctl_din      ( ioctl_din       ),
-    .obj_amsb       ( obj_amsb        ),
-    .part_addr      (                 ),
 
     .debug_bus      ( debug_bus       ),
     .st_scr         ( st_scr          ),
@@ -258,7 +255,7 @@ jtsimson_obj #(.RAMW(13),.SHADOW(1),.ESTRIDE_LOG2(5),.ENTRY_LOG2(8),
     .prio       ( lyro_pri  ),
     // Debug
     .ioctl_ram  ( ioctl_ram ),
-    .ioctl_addr ( {obj_amsb[1:0],ioctl_addr[11:0]} ),
+    .ioctl_addr ( ioctl_addr[13:0] ),
     .dump_ram   ( dump_obj  ),
     .dump_reg   ( obj_mmr   ),
     .gfx_en     ( gfx_en    ),
@@ -299,7 +296,7 @@ jtmoo_colmix u_colmix(
     .blue       ( blue      ),
 
     // Debug
-    .ioctl_addr ( ioctl_addr[11:0]),
+    .ioctl_addr ( ioctl_addr[12:0]),
     .ioctl_ram  ( ioctl_ram ),
     .ioctl_din  ( dump_pal  ),
     .mmr_dump   ( pal_mmr   ),

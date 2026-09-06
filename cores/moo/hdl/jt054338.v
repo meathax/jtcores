@@ -25,7 +25,8 @@ module jt054338 #(
     output            shdpri,
     output            brtpri,
     output            clipsl,
-    output     [23:0] dump_mmr,
+    input      [ 4:0] dump_addr,
+    output     [ 7:0] dump_mmr,
     output     [ 7:0] bri1_lvl,
 
     output signed [9:0] shadow_r,
@@ -41,6 +42,20 @@ localparam BGC_R   =  4'd0,
            CONTROL =  4'd15;
 
 reg [15:0] regs[0:15];
+
+`ifdef SIMULATION
+reg [7:0] scene_regs[0:31];
+integer scene_file, scene_count, scene_i;
+initial begin
+    scene_count = 0;
+    scene_file = $fopen("k338_mmr.bin","rb");
+    if( scene_file != 0 ) begin
+        scene_count = $fread(scene_regs,scene_file);
+        $fclose(scene_file);
+        if( scene_count != 32 ) $fatal(1,"K054338 scene requires 32 register bytes");
+    end
+end
+`endif
 
 wire [ 3:0] shd_base = shadow == 2'd2 ? SHAD1R + 4'd3 :
                        shadow == 2'd3 ? SHAD1R + 4'd6 : SHAD1R;
@@ -61,7 +76,8 @@ assign mixpri      = regs[CONTROL][1];
 assign shdpri      = regs[CONTROL][2];
 assign brtpri      = regs[CONTROL][3];
 assign clipsl      = regs[CONTROL][5];
-assign dump_mmr    = { regs[CONTROL][7:0], regs[BRI3][7:0], regs[PBLEND][7:0] };
+assign dump_mmr    = dump_addr[0] ? regs[dump_addr[4:1]][15:8] :
+                                  regs[dump_addr[4:1]][ 7:0];
 assign bri1_lvl    = regs[BRI3][7:0];
 
 assign shadow_r    = {shd_r9[8], shd_r9};
@@ -74,6 +90,11 @@ always @(posedge clk, posedge rst) begin
         regs[ 4] <= 0; regs[ 5] <= 0; regs[ 6] <= 0; regs[ 7] <= 0;
         regs[ 8] <= 0; regs[ 9] <= 0; regs[10] <= 0; regs[11] <= 0;
         regs[12] <= 0; regs[13] <= 0; regs[14] <= 0; regs[15] <= 0;
+`ifdef SIMULATION
+        if( scene_count == 32 )
+            for( scene_i=0; scene_i<16; scene_i=scene_i+1 )
+                regs[scene_i] <= {scene_regs[2*scene_i+1],scene_regs[2*scene_i]};
+`endif
     end else if( cs && we ) begin
         if( !dsn[1] ) regs[addr][15:8] <= din[15:8];
         if( !dsn[0] ) regs[addr][ 7:0] <= din[ 7:0];

@@ -1,11 +1,20 @@
 moo:
   - get:
-    - "*.v"
+    - jt054338.v
+    - jtk053252_mmr.v
+    - jtmoo_colmix.v
+    - jtmoo_dump.v
+    - jtmoo_game.v
+    - jtmoo_k054539.v
+    - jtmoo_main.v
+    - jtmoo_prot.v
+    - jtmoo_scroll.v
+    - jtmoo_sound.v
+    - jtmoo_video.v
 jt05415x:
 riders:
   - get:
     - jt054321.v
-    - jtriders_dump.v
 rungun:
   - get:
     - jtk053252.v

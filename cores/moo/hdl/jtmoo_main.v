@@ -327,9 +327,6 @@ jtframe_m68k u_cpu(
     .IPLn       ( IPLn        )
 );
 `else
-    reg [7:0] saved[0:0];
-    integer f,fcnt=0;
-
     initial begin
         objcha_n  = 1;
         objreg_cs = 0;
@@ -337,7 +334,9 @@ jtframe_m68k u_cpu(
         pcu_cs    = 0;
         k338_cs   = 0;
         rmrd_cs   = 0;
-        reg_cs    = 0;
+        scr_cs    = 0;
+        scrreg_cs = 0;
+        cco_cs    = 0;
         ram_cs    = 0;
         rom_cs    = 0;
         sndon     = 0;
@@ -347,7 +346,10 @@ jtframe_m68k u_cpu(
         cpu_dout  = 0,
         cpu_we    = 0,
         main_addr = 0,
-        ram_dsn   = 0,
+        ram_dsn   = 2'b11,
+        ram_we    = 0,
+        rw        = 1,
+        oram_we   = 0,
         st_dout   = 0,
         nv_addr   = 0,
         nv_din    = 0,

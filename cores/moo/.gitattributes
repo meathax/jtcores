@@ -1,0 +1,3 @@
+ver/game/dump_split.sh text eol=lf
+ver/moomesa/sim.sh text eol=lf
+ver/moomesa/sim_coin.sh text eol=lf

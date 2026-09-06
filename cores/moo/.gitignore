@@ -1,0 +1,17 @@
+!/ver/audit/
+!/ver/audit/.gitignore
+!/ver/audit/test_scripts.py
+!/ver/audit/tb_video_contracts.sv
+!/ver/audit/tb_nomain.sv
+!/ver/audit/prepare_map.py
+!/ver/audit/colmix_test.cpp
+!/ver/audit/validate_mra.py
+!/ver/audit/colmix_diagnostic.vlt
+!/ver/audit/nomain_diagnostic.vlt
+!/ver/audit/test_scene.py
+!/ver/audit/dump_test.cpp
+!/ver/audit/dump_diagnostic.vlt
+!/ver/game/scene.py
+!/hdl/jtmoo_dump.v
+!/ver/audit/check_generation.py
+!/ver/audit/test_generation.py

@@ -41,7 +41,7 @@ module jtmoo_colmix(
     output     [ 7:0] blue,
 
     // Debug
-    input      [11:0] ioctl_addr,
+    input      [12:0] ioctl_addr,
     input             ioctl_ram,
     output reg [ 7:0] ioctl_din,
     output     [ 7:0] mmr_dump,
@@ -98,14 +98,15 @@ assign mcol_blank = p0_opaque ? 1'b0 : col_n;
 assign mcol_shd   = p0_opaque ? 2'b0 : shd_out;
 assign mcol_bri   = p0_opaque ? 1'b0 : brit;
 // plane 0 reads the palette on the odd clock cycles, bank 0x700-0x7FF
-assign pal_addr   = ioctl_ram ? {1'b0,ioctl_addr[11:2]} :
+assign pal_addr   = ioctl_ram ? ioctl_addr[12:2] :
                     ph        ? {3'b111,lyrf_l[7:0]}    : col;
 
-// K054338/K053251 register dump: ioctl_addr[4] (or debug_bus[7]) selects the chip
-assign k338_dump_sel = ioctl_ram ? ioctl_addr[4]   : debug_bus[7];
-assign k338g_addr    = ioctl_ram ? ioctl_addr[9:5] : debug_bus[4:0];
+// Version 1 dump allocates separate aligned blocks to the two chips.
+assign k338_dump_sel = ioctl_ram ? ioctl_addr[5]   : debug_bus[7];
+assign k338g_addr    = ioctl_ram ? ioctl_addr[4:0] : debug_bus[4:0];
 assign k251g_addr    = ioctl_ram ? ioctl_addr[3:0] : debug_bus[3:0];
-assign mmr_dump      = k338_dump_sel ? k338g_dump : k251g_dump;
+assign mmr_dump      = k338_dump_sel ? k338g_dump :
+                      k251g_addr < 4'd13 ? k251g_dump : 8'd0;
 
 // CLIPSL disables the clamp, the sum wraps instead
 function [7:0] add_clip(input [7:0] cin, input signed [9:0] delta, input noclip);
@@ -180,7 +181,7 @@ always @(posedge clk, posedge rst) begin
             fixop_a <= p0_opaque;
             blend_a <= p0_opaque & pblend0;
             bgr     <= apply_bright( !k338_video_en   ? 24'd0 :
-                       blank_l          ? k338_bg :
+                       blank_l          ? {k338_bg[7:0],k338_bg[15:8],k338_bg[23:16]} :
                        fixop_a & ~blend_a ? { fb8, fg8, fr8 } :
                        fixop_a &  blend_a ? { mix_blend(fb8,b8,alpha_level,alpha_add),
                                                mix_blend(fg8,g8,alpha_level,alpha_add),
@@ -227,7 +228,8 @@ jt054338 u_k338(
     .shdpri      (                 ),
     .brtpri      (                 ),
     .clipsl      ( clipsl          ),
-    .dump_mmr    (                 ),
+    .dump_addr   ( k338g_addr      ),
+    .dump_mmr    ( k338g_dump      ),
     .bri1_lvl    ( bri1_lvl        ),
 
     .shadow_r    ( shad_r          ),
@@ -257,61 +259,12 @@ jtcolmix_053251 u_k251(
     // shadow
     .shd_in     ( shadow    ),
     .shd_out    ( shd_out   ),
-    // dump to SD card, done through u_k251g instead
-    .ioctl_addr ( ioctl_ram ? ioctl_addr[3:0] : debug_bus[3:0] ),
-    .ioctl_din  (           ),
+    .ioctl_addr ( k251g_addr ),
+    .ioctl_din  ( k251g_dump ),
 
     .cout       ( col       ),
     .brit       ( brit      ),
     .col_n      ( col_n     )
-);
-
-// read-only register mirrors for the SD-card dump, no effect on the chip models
-jtk054338_mmr u_k338g(
-    .rst        ( rst        ),
-    .clk        ( clk        ),
-
-    .cs         ( reg_cs     ),
-    .addr       ( cpu_addr[4:1] ),
-    .rnw        ( ~cpu_we    ),
-    .din        ( cpu_dout   ),
-    .dout       (            ),
-    .dsn        ( cpu_dsn    ),
-
-    .bgc_r      (), .bgc_g (), .bgc_b (),
-    .shd1_r (), .shd1_g (), .shd1_b (),
-    .shd2_r (), .shd2_g (), .shd2_b (),
-    .shd3_r (), .shd3_g (), .shd3_b (),
-    .bri1_lvl (), .bri2_lvl (), .bri3_lvl (),
-    .mix1_lvl (), .mix1_mode (),
-    .mix2_lvl (), .mix2_mode (),
-    .mix3_lvl (), .mix3_mode (),
-    .video_en (), .mixpri (), .shdpri (), .brtpri (), .clipsl (),
-
-    .ioctl_addr ( k338g_addr ),
-    .ioctl_din  ( k338g_dump ),
-    .debug_bus  ( debug_bus  ),
-    .st_dout    (            )
-);
-
-jtk053251_mmr u_k251g(
-    .rst        ( rst        ),
-    .clk        ( clk        ),
-
-    .cs         ( pcu_we     ),
-    .addr       ( cpu_addr[4:1] ),
-    .rnw        ( ~cpu_we    ),
-    .din        ( {2'd0,cpu_dout[5:0]} ),
-    .dout       (            ),
-
-    .pri0_ext (), .pri1_ext (), .pri2_ext (), .pri3 (), .pri4 (),
-    .brit_thr (), .shd1_pri (), .shd2_pri (), .shd3_pri (),
-    .colhi0 (), .colhi3 (), .full_en (), .exten (),
-
-    .ioctl_addr ( k251g_addr ),
-    .ioctl_din  ( k251g_dump ),
-    .debug_bus  ( debug_bus  ),
-    .st_dout    (            )
 );
 
 jtframe_dual_ram #(.AW(11),.SIMFILE("pal_g.bin")) u_pal_g(
