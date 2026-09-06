@@ -35,7 +35,13 @@ HELP
     exit 1
 fi
 
-"$BASH" ../game/dump_split.sh --scene "$SCENE" --nvram --fullram
+if [[ -n "$SCENE" ]]; then
+    echo "Scene snapshot restore was removed in the 2026-09-06 jtcores cleanup" >&2
+    echo "(it depended on ../game/scene.py, archived at" >&2
+    echo "D:\\evidence\\moo\\other_session_20260906\\ver\\game\\scene.py)." >&2
+    echo "Re-run without --scene, or restore that script locally." >&2
+    exit 1
+fi
 
 jtsim "${OTHER[@]}"
 
