@@ -310,10 +310,13 @@ assign b_xsum = {4'd0,hdump} + HOFSC + {1'b0,lnscr_ctrl[4] ? c_scrx : lyrb_lnscr
 assign c_xsum = {4'd0,hdump} + HOFSD + {1'b0,lnscr_ctrl[6] ? d_scrx : lyrc_lnscr} +
                 (glob_ctrl[4] ? hflip_corr_ext : 13'd0);
 
-assign f_ysum = {3'd0,vdump} + {1'b0,a_scry} + (glob_ctrl[5] ? vflip_corr_ext : 12'd0);
-assign a_ysum = {3'd0,vdump} + {1'b0,b_scry} + (glob_ctrl[5] ? vflip_corr_ext : 12'd0);
-assign b_ysum = {3'd0,vdump} + {1'b0,c_scry} + (glob_ctrl[5] ? vflip_corr_ext : 12'd0);
-assign c_ysum = {3'd0,vdump} + {1'b0,d_scry} + (glob_ctrl[5] ? vflip_corr_ext : 12'd0);
+// first visible line is vdump 0x110 = tilemap row 16 (moo.cpp set_visarea)
+wire [ 8:0] vscr = vdump - 9'h100;
+
+assign f_ysum = {3'd0,vscr} + {1'b0,a_scry} + (glob_ctrl[5] ? vflip_corr_ext : 12'd0);
+assign a_ysum = {3'd0,vscr} + {1'b0,b_scry} + (glob_ctrl[5] ? vflip_corr_ext : 12'd0);
+assign b_ysum = {3'd0,vscr} + {1'b0,c_scry} + (glob_ctrl[5] ? vflip_corr_ext : 12'd0);
+assign c_ysum = {3'd0,vscr} + {1'b0,d_scry} + (glob_ctrl[5] ? vflip_corr_ext : 12'd0);
 
 assign f_heff = glob_ctrl[4] ? ~f_xsum[8:0] : f_xsum[8:0];
 assign a_heff = glob_ctrl[4] ? ~a_xsum[8:0] : a_xsum[8:0];

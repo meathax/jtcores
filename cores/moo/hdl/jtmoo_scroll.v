@@ -109,14 +109,32 @@ jt05415x #(.SIMFILE156("scr_mmr.bin"),.SIMFILE157("gfx_mmr.bin")) u_05415x(
     .st_157_dout  ( st_157         )
 );
 
+// HS is a level from the CCU, so vdump steps once per HS edge. 264 lines over
+// 0x0F8-0x1FF, visible from 0x110 (jt053246_scan.sv), LVBL edge = frame origin
+reg hs_l, lvbl_l, vfirst;
+
 always @(posedge clk, posedge rst) begin
     if( rst ) begin
-        hdump <= 0;
-        vdump <= 0;
+        hdump  <= 0;
+        vdump  <= 9'h110;
+        hs_l   <= 0;
+        lvbl_l <= 0;
+        vfirst <= 0;
     end else if( pxl_cen ) begin
-        hdump <= hs ? 9'd0 : hdump + 9'd1;
-        if( hs ) vdump <= vs ? 9'd0 : vdump + 9'd1;
+        hs_l   <= hs;
+        lvbl_l <= lvbl;
+        hdump  <= hs ? 9'd0 : hdump + 9'd1;
+        if( lvbl & ~lvbl_l ) vfirst <= 1;
+        if( hs & ~hs_l ) begin
+            vfirst <= 0;
+            vdump  <= vfirst ? 9'h110 : vdump==9'h1FF ? 9'h0F8 : vdump + 9'd1;
+        end
     end
 end
+
+`ifdef SIMULATION
+/* verilator tracing_off */
+wire unused_scroll = &{ 1'b0, vs };
+`endif
 
 endmodule
