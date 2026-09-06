@@ -1,7 +1,6 @@
-/* SPDX-FileCopyrightText: 2026 Jose Tejada Gomez
+/* SPDX-FileCopyrightText: 2026 meathax
  * SPDX-License-Identifier: GPL-3.0-or-later
- * Author: Rafael Eduardo Paiva Feener. Copyright: Jose Tejada Gomez
- * Version: 1.0
+ * Author: meathax
  * Date: 4-9-2026 */
 
 // K053990 as Moo Mesa uses it: bus-mastering block operation dst[i]=src1[i]+2*src2[i]

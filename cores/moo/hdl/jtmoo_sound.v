@@ -1,5 +1,6 @@
-/* SPDX-FileCopyrightText: 2026 Jose Tejada Gomez
+/* SPDX-FileCopyrightText: 2026 meathax
  * SPDX-License-Identifier: GPL-3.0-or-later
+ * Author: meathax
  * Date: 2-9-2026 */
 
 module jtmoo_sound(

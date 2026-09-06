@@ -1,4 +1,7 @@
-/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* SPDX-FileCopyrightText: 2026 meathax
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Author: meathax
+ * Date: 6-9-2026 */
 
 module jtmoo_dump(
     input             clk,
