@@ -1,51 +1,17 @@
-/*  This file is part of JTCORES.
-    JTCORES program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
+/* SPDX-FileCopyrightText: 2026 meathax
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Author: meathax
+ * Date: 6-9-2026 */
 
-    JTCORES program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
-    Author: meathax
-    Date: 4-9-2026 */
-
-/*  Konami K054539 (TOP) PCM sound chip, Moo Mesa local model.
-
-    LOCAL VERIFICATION ONLY. This is not, and does not claim to be, the shared
-    `jt539` module. It is an independent implementation written from MAME's
-    k054539.cpp and Furrtek's SiliconRE 054539 die reconstruction, kept inside
-    cores/moo so that Moo's sound self-test and boot path can be exercised
-    while the shared-module question is settled upstream. Do not promote this
-    file to modules/ and do not use it from another core.
-
-    Board facts honoured (sch/moomesa/sound.kicad_sch, E4 and C5):
-      - no A8 pin: the register file is addressed as {A9,A[7:0]}, so
-        0xE100-0xE1FF mirrors 0xE000-0xE0FF.
-      - AXDA/AXXA/ALRA/AXWA (pins 36-39) carry the YM2151 serial DAC stream and
-        YMD (pin 73) is strapped to VCC, so the aux stream is mixed digitally
-        inside this chip; the 054539 output is the board's only analogue
-        source. That is why `aux_l`/`aux_r` exist here at all.
-      - reverb SRAM C5 is an HM62256 driven on R_A0..13 plus R_A16; RABS is NC.
-      - straps: DTS1=1, DTS2=0, USE2=0, RRMD=0, DLY=0, ADDA=0. TIM and ROBS NC.
-
-    Register read-back is real chip behaviour and a boot requirement: the sound
-    Z80 POST writes and re-reads 0xE000-0xE1FF, and a chip that returns zero
-    fails the test and drives the 68000 into its device-error screen.
-
-    Implemented: register file with read-back, 8-channel serial sequencer at one
-    sample every 384 `cen` (48 kHz), the three sample formats Moo uses (8-bit,
-    16-bit LE and 4-bit DPCM with their 0x80/0x8000/0x88 terminators), Q16 mix
-    with the voltab/pantab tables, key on/off, UPDATE_AT_KEYON position latches,
-    live position mirroring, forward and reverse playback, the 0x227
-    programmable timer, the reverb delay line, and the 0x22d/0x22e data port
-    over both the reverb RAM and the shared PCM ROM.
-*/
+/* Konami K054539 (TOP) PCM sound chip.
+   Written from MAME's k054539.cpp and Furrtek's SiliconRE 054539 die
+   reconstruction; not derived from jt539. Moo Mesa board straps
+   (sound.kicad_sch E4/C5): no A8 pin, so the register file is addressed as
+   {A9,A[7:0]} and 0xE1xx mirrors 0xE0xx; YMD=1 with AXDA/AXXA/ALRA/AXWA
+   carrying the YM2151 serial stream, so the aux input is mixed digitally here
+   and this chip is the board's only analogue source; reverb SRAM C5 is an
+   HM62256 on R_A0..13 plus R_A16 (0x8000 byte window), RABS NC; DTS1=1,
+   DTS2=0, USE2=0, RRMD=0, DLY=0, ADDA=0; TIM and ROBS NC. */
 
 module jtmoo_k054539 #(parameter
     VOLSHIFT = 0,                   // aux (YM2151) attenuation, in right shifts
@@ -64,14 +30,13 @@ module jtmoo_k054539 #(parameter
     input               cs,
     input      [ 7:0]   din,
     output     [ 7:0]   dout,
-    output reg          busy,    // hold the sound CPU while a data-port read is in flight
-    // PCM ROM, shared SDRAM: the data is not zero latency, so rom_ok must be
-    // honoured. Reading without waiting yields false terminators and dropouts.
+    output reg          busy,    // holds the sound CPU during a data-port read
+    // PCM ROM
     output              rom_cs,
     output     [23:0]   rom_addr,
     input      [ 7:0]   rom_data,
     input               rom_ok,
-    // YM2151 serial DAC stream, mixed in by the chip (see header)
+    // YM2151 serial DAC stream, mixed in by the chip
     input signed [15:0] aux_l,
     input signed [15:0] aux_r,
     // Sound output
@@ -82,24 +47,18 @@ module jtmoo_k054539 #(parameter
     output     [ 7:0]   st_dout
 );
 
-// ---------------------------------------------------------------------------
-// Register file, addressed with the board bus {A9,A7:0}.
-// MAME offset -> module offset: channels 0x0xx unchanged; control 0x2xx->0x1xx
-//   active=0x22c->0x12c  ctrl=0x22f->0x12f  keyon=0x214->0x114 keyoff=0x215->0x115
-//   channel base1=0x20*ch (unchanged)   base2=0x200+2*ch -> 0x100+2*ch
-// The CPU and the sequencer share this single write process so that Quartus
-// infers one register block instead of a multiply driven array.
-// ---------------------------------------------------------------------------
+// Register file on the board bus {A9,A7:0}. MAME offset -> module offset:
+// channels 0x0xx unchanged, control 0x2xx -> 0x1xx. MAME's 0x1xx page needs A8
+// and is unreachable on this board. CPU and sequencer share one write process
+// so Quartus infers a single register block.
 reg  [7:0] regs [0:511];
 reg  [7:0] active;
 reg  [7:0] rr_cpu_data;
 reg  [7:0] rb_data;
-// UPDATE_AT_KEYON holds position writes outside the visible register file
-// until the next key-on. Kept flat for Quartus inference.
+// UPDATE_AT_KEYON position writes, held outside the visible register file
 reg  [7:0] pos_latch [0:23];
-// The chip captures CPU writes when the active low write strobe is released.
-// The Z80 holds one bus transaction across several 48 MHz clocks, so keep its
-// stable bus value and emit exactly one release commit.
+// The chip commits a CPU write when the write strobe is released; the Z80 holds
+// one transaction across several 48 MHz clocks, so emit exactly one commit
 reg        cpu_write_pending;
 reg  [8:0] cpu_write_addr;
 reg  [7:0] cpu_write_data;
@@ -108,7 +67,7 @@ wire       cpu_write_commit = cpu_write_pending && !cpu_write_active;
 integer    gi;
 initial for (gi=0; gi<512; gi=gi+1) regs[gi] = 8'd0;
 
-wire update_at_keyon = regs[9'h12f][0];
+wire update_at_keyon = regs[9'h12f][0];   // MAME `latch`: UPDATE_AT_KEYON && PCM enable
 wire reg_updates     = ~regs[9'h12f][7];
 wire [7:0] keyon_retrigger = (cpu_write_commit &&
                               (cpu_write_addr == 9'h114) && reg_updates) ?
@@ -119,11 +78,8 @@ assign dout    = (addr == 9'h12c) ? active :
                                       (regs[9'h12e] == 8'h80 ? rr_cpu_data : rb_data) : 8'h00) :
                  regs[addr];
 
-// 0x227 (module 0x127) programs a real periodic timer:
-//   period = (38+data) * (clock/384/14400), halved, per MAME k054539.cpp:421-429
-//   and call_timer_handler at k054539.cpp:309-313. The timer free runs once
-//   armed, toggling timer_state every period, but only while 0x22f bit 5 is
-//   set. `timeout` mirrors that square wave, not the sample tick.
+// 0x227 timer: MAME k054539.cpp:426 gives a toggle every 7200/(38+data) sample
+// ticks. Free running once armed; the output moves only while 0x22f b5 is set
 reg  [12:0] timer_cnt;
 reg         timer_state;
 reg         timer_armed;
@@ -135,12 +91,8 @@ wire [8:0] b1 = {1'b0, ch, 5'b0};
 wire [8:0] b2 = 9'h100 + {5'b0, ch, 1'b0};
 assign timeout = timer_state;
 
-// ---------------------------------------------------------------------------
-// Volume and pan tables, Q16, same values as MAME's fixed mode.
-// Bare file names follow the jtframe convention (see jtriders_tmnt2.v's
-// log2.hex): the master copies live in cores/moo/hdl and are staged into the
-// simulation directory.
-// ---------------------------------------------------------------------------
+// Q16 volume/pan tables, MAME k054539.cpp:531-539 rounded to nearest.
+// Bare file names follow the jtframe convention (cf. log2.hex)
 reg [15:0] voltab [0:255];   // <= 0x4000
 reg [16:0] pantab [0:15];    // <= 0x10000
 initial begin
@@ -148,9 +100,7 @@ initial begin
     $readmemh(PANTAB, pantab);
 end
 
-// ---------------------------------------------------------------------------
-// Per channel state, authoritative, in BYTE units between samples
-// ---------------------------------------------------------------------------
+// Per channel state, in BYTE units between samples
 reg [23:0] cpos   [0:7];
 reg [15:0] cpfrac [0:7];
 reg signed [15:0] cval  [0:7];
@@ -158,9 +108,6 @@ reg signed [15:0] cpval [0:7];
 
 reg  [7:0] restart;   // key-on edge restart
 
-// ---------------------------------------------------------------------------
-// Sequencer
-// ---------------------------------------------------------------------------
 localparam [3:0]
     S_IDLE = 4'd0, S_LOAD = 4'd1, S_ACC = 4'd2,
     S_R8   = 4'd3, S_R16L = 4'd4, S_R16H = 4'd5, S_RD = 4'd6,
@@ -182,9 +129,12 @@ reg [3:0]  w_pan;
 reg [1:0]  w_type;            // 0=8bit, 1=16bit(0x4), 2=DPCM(0x8), 3=no-op(0xc)
 reg        w_loopen;
 reg        w_reverse;
+// MAME retries a terminator at the loop point only once and then keys off
+// (k054539.cpp:206-214); without this flag a loop point holding a terminator
+// would spin the sequencer forever
+reg        w_looped;
 
-// Playback ROM request registers. The external port is arbitrated with the
-// data-port readback below; only one request is presented at a time.
+// Playback ROM request, arbitrated with the data-port readback below
 reg         sample_rom_cs;
 reg  [23:0] sample_rom_addr;
 
@@ -200,12 +150,10 @@ wire        rr_cpu_read = cs && rd && (addr == 9'h12d) &&
 assign rom_cs   = sample_rom_cs | rb_active;
 assign rom_addr = rb_active ? rb_addr_l : sample_rom_addr;
 
-// The board leaves the Z80 WAIT pin unconnected, so the real chip answers the
-// data port without stalling the CPU; it owns a private PCM ROM bus. Here the
-// samples come from shared SDRAM, so the read cannot always be answered inside
-// one Z80 bus cycle. `busy` is registered and fed back to the sound CPU clock
-// enable, which reproduces the data (correct bytes, no false terminators) at
-// the cost of a stall the board does not have. INFERRED, fidelity only.
+// The board leaves the Z80 WAIT pin unconnected because the real chip owns a
+// private PCM ROM bus. Here the samples come from shared SDRAM, so a data-port
+// read cannot always answer inside one Z80 bus cycle; `busy` gates the sound
+// CPU clock enable instead. INFERRED, fidelity only
 wire        rb_wait  = rb_pending | rb_active |
                        (rb_cpu_read && !rb_data_valid) |
                        (rr_cpu_read && !rr_cpu_data_valid);
@@ -213,16 +161,13 @@ wire        rb_wait  = rb_pending | rb_active |
 // Q16 accumulators, as MAME: sum at full precision and shift >>16 once
 reg signed [39:0] accL, accR;
 
-// ---------------------------------------------------------------------------
-// Reverb, mono delay line (MAME k054539.cpp). The audio delay uses
-// int16[0x2000] words; the CPU data port exposes the whole 0x8000 byte store,
-// with pointer bit 16 selecting the upper 0x4000 byte half.
-// Per sample: read+clear rram[reverb_pos] (feedback, added to L and R alike);
-// every channel accumulates its attenuated sample in rram[(rdelta+reverb_pos)
-// &0x1fff]; then reverb_pos++. The read is registered so that BRAM is inferred.
-// Init through $readmemh rather than an `initial for` loop: Quartus caps the
-// unroll at 5000 iterations and 8192 would raise Error 10106.
-// ---------------------------------------------------------------------------
+// Reverb (MAME k054539.cpp:116-131,289,302). Per sample: read+clear
+// rram[reverb_pos] as feedback into L and R, every channel accumulates its
+// attenuated sample at rram[(rdelta+reverb_pos)&0x1fff], then reverb_pos++.
+// The audio delay line is int16[0x2000]; the CPU data port sees the board's
+// full 0x8000 byte store, pointer bit 16 selecting the upper half (MAME models
+// only 0x4000 bytes). $readmemh init, not an `initial for`: Quartus caps the
+// unroll at 5000 iterations and 8192 would raise Error 10106
 reg  [16:0] read_ptr;             // 0x22d pointer, wraps at 0x1ffff
 reg  [12:0] reverb_pos;
 reg  [12:0] rr_addr;              // write address: clear @revpos, RMW @widx
@@ -231,9 +176,8 @@ reg  signed [15:0] rr_din;
 wire [14:0] rr_port_addr = {read_ptr[16], read_ptr[13:0]};
 wire [12:0] rd_addr;
 
-// The reverb store has two independent 0x4000 byte banks. The CPU data port
-// stays on RAM port 0 and the audio read/modify/write path on port 1, so
-// Quartus infers two dual port M10K memories instead of 262,144 flops.
+// Two 0x4000 byte banks: CPU data port on RAM port 0, audio RMW on port 1, so
+// Quartus infers two dual port M10Ks instead of 262,144 flops
 wire        rr_cpu_write = cpu_write_commit && (cpu_write_addr == 9'h12d) &&
                             (regs[9'h12e] == 8'h80);
 wire [1:0]  rr_cpu_we = rr_cpu_write ?
@@ -241,8 +185,7 @@ wire [1:0]  rr_cpu_we = rr_cpu_write ?
 wire [15:0] rr_cpu_din = rr_port_addr[0] ? {cpu_write_data,8'h00} :
                                            {8'h00,cpu_write_data};
 wire [15:0] rr_lo_cpu_q, rr_hi_cpu_q, rr_audio_q;
-/* The upper CPU visible bank has no audio port consumer in the 0x2000 word
-   MAME delay path; keep its parked dual port output explicit. */
+// The upper CPU visible bank has no audio port consumer
 /* verilator lint_off UNUSEDSIGNAL */
 wire [15:0] rr_hi_audio_q;
 /* verilator lint_on UNUSEDSIGNAL */
@@ -294,7 +237,7 @@ wire [7:0] rram_port_dout = rr_cpu_addr_l[0] ?
                               rram_port_word[15:8] :
                               rram_port_word[7:0];
 
-// --- current channel L/R volume, Q16 ---
+// current channel L/R volume, Q16. VOL_CAP=1.8, MAME k054539.cpp:109,158-164
 wire [16:0] vt   = {1'b0, voltab[w_vol]};
 wire [16:0] pl   = pantab[w_pan];
 wire [16:0] pr   = pantab[4'd14 - w_pan];
@@ -307,20 +250,17 @@ wire [16:0] rfull_discarded_diag = {rfull[33], rfull[15:0]};
 wire [16:0] lvol = lful_clamp(lfull[32:16]);
 wire [16:0] rvol = lful_clamp(rfull[32:16]);
 function [16:0] lful_clamp(input [16:0] v);
-    lful_clamp = (v > 17'h1CCCC) ? 17'h1CCCC : v;   // VOL_CAP=1.8 in Q16
+    lful_clamp = (v > 17'h1CCCC) ? 17'h1CCCC : v;
 endfunction
 
-// channel contribution in Q16, not truncated: w_val * vol. Rounded at the end.
+// channel contribution in Q16, rounded once at S_DONE
 wire signed [33:0] cprodL = $signed(w_val) * $signed({1'b0, lvol});
 wire signed [33:0] cprodR = $signed(w_val) * $signed({1'b0, rvol});
 wire signed [39:0] contribL = {{6{cprodL[33]}}, cprodL};
 wire signed [39:0] contribR = {{6{cprodR[33]}}, cprodR};
 
-// --- Reverb parameters of the current channel (MAME, fixed mode) ---
-//   rdelta = ({base1[7],base1[6]} >> 3);  rdelta = (rdelta+revpos)&0x3fff;
-//   widx   = (rdelta + revpos) & 0x1fff;  (revpos added TWICE: exact MAME quirk)
-//   bval   = min(vol + base1[4], 255);    rbvol = (voltab[bval]*32768)>>16
-//   rev_contrib = (int16)((cur_val * rbvol) >> 16), accumulated in rram[widx]
+// Reverb parameters of the current channel. MAME k054539.cpp:170-171,289 adds
+// reverb_pos twice on the way to widx; that is reproduced deliberately
 wire [15:0] rdelta_word = {regs[b1+9'd7], regs[b1+9'd6]};
 /* verilator lint_off UNUSEDSIGNAL */
 wire [2:0]  rdelta_discarded_diag = rdelta_word[2:0];
@@ -336,7 +276,7 @@ assign rd_addr = ((state == S_MIX) || (state == S_RVWR)) ?
                  widx : reverb_pos;
 wire [8:0]  bsum = {1'b0,w_vol} + {1'b0, regs[b1+9'd4]};
 wire [7:0]  bval = bsum[8] ? 8'd255 : bsum[7:0];                  // clamp 255
-wire [15:0] rbvol = {1'b0, voltab[bval][15:1]};                   // voltab>>1
+wire [15:0] rbvol = {1'b0, voltab[bval][15:1]};                   // voltab/2
 wire signed [32:0] rprod = $signed(w_val) * $signed({1'b0, rbvol});
 /* verilator lint_off UNUSEDSIGNAL */
 wire [16:0] rprod_discarded_diag = {rprod[32], rprod[15:0]};
@@ -348,19 +288,17 @@ wire [23:0] delta_now = {regs[b1+9'd2], regs[b1+9'd1], regs[b1+9'd0]};
 wire signed [31:0] delta_signed = regs[b2][5] ?
                                    -$signed({8'b0,delta_now}) :
                                     $signed({8'b0,delta_now});
-// MAME k054539.cpp:195 switches on base2[0]&0xc: 0x0/0x4/0x8 are the three
-// known formats; 0xc falls to `default:` at k054539.cpp:281-283, which performs
-// no ROM read and no position advance, so the channel idles. type_now==2'd3
-// encodes that no-op case; see S_LOAD/S_MIX below.
+// MAME k054539.cpp:197 switches on base2[0]&0xc; 0xc falls to the default at
+// :283, which reads no ROM and advances nothing, so type 2'd3 idles the channel
 wire [1:0]  type_now  = (regs[b2] & 8'h0c)==8'h00 ? 2'd0 :
                         (regs[b2] & 8'h0c)==8'h04 ? 2'd1 :
                         (regs[b2] & 8'h0c)==8'h08 ? 2'd2 : 2'd3;
 
-// UPDATE_AT_KEYON latch index: 3*ch + (addr[4:0]-0x0c). addr[4:2] is 3'b011 in
-// that window, so the offset is simply addr[1:0].
+// UPDATE_AT_KEYON latch index 3*ch + (addr[4:0]-0x0c); addr[4:2] is 3'b011 in
+// that window, so the offset is just addr[1:0]
 wire [4:0] pl_idx = {2'b0,addr[7:5]} + {1'b0,addr[7:5],1'b0} + {3'b0,addr[1:0]};
 
-// DPCM step table (x0x100)
+// DPCM step table (x0x100), MAME k054539.cpp:111-114
 function signed [15:0] dpcm_step(input [3:0] n);
     case (n)
         4'd0:  dpcm_step =  16'sd0;      4'd1:  dpcm_step =  16'sd256;
@@ -393,10 +331,8 @@ wire signed [15:0] ds = dpcm_step(dnib);
 wire [24:0] npos1 = w_reverse ? w_pos - 25'd1 : w_pos + 25'd1;
 wire [24:0] npos2 = w_reverse ? w_pos - 25'd2 : w_pos + 25'd2;
 
-// ---------------------------------------------------------------------------
-// Output. The YM2151 aux stream is summed here because the board mixes it
-// inside this chip (see the header). VOLSHIFT attenuates the aux leg only.
-// ---------------------------------------------------------------------------
+// Output. The board mixes the YM2151 aux stream inside this chip (see header);
+// VOLSHIFT attenuates the aux leg only
 reg signed [15:0] pcm_l, pcm_r;
 wire signed [15:0] aux_l_att = aux_l >>> VOLSHIFT;
 wire signed [15:0] aux_r_att = aux_r >>> VOLSHIFT;
@@ -420,6 +356,9 @@ always @(posedge clk) begin
         pcm_l <= 0; pcm_r <= 0; accL <= 0; accR <= 0;
         busy <= 1'b0;
         active <= 0; restart <= 0;
+        w_looped <= 1'b0;
+        // MAME device_reset clears 0x22c (=active) and 0x22f only
+        regs[9'h12f] <= 8'd0;
         cpu_write_pending <= 1'b0;
         cpu_write_addr <= 9'd0;
         cpu_write_data <= 8'd0;
@@ -450,9 +389,7 @@ always @(posedge clk) begin
             cpu_write_pending <= 1'b0;
         end
 
-        // ROM bank data port reads are serialized behind the playback
-        // sequencer. The Z80 is held through `busy` while the shared SDRAM byte
-        // is fetched; sample timing is paused only for this transaction.
+        // ROM bank data port reads are serialized behind the playback sequencer
         if (!rb_cpu_read) begin
             rb_read_seen <= 1'b0;
             rb_data_valid <= 1'b0;
@@ -461,18 +398,15 @@ always @(posedge clk) begin
         end else if (!rb_read_seen) begin
             rb_read_seen <= 1'b1;
             if (!rb_pending && !rb_active) begin
-                // Capture the byte address at the start of the CPU
-                // transaction. The serial pointer is incremented on the same
-                // clock edge below, so deriving the address later would skip
-                // the byte being read.
+                // Capture the byte address at the start of the transaction: the
+                // pointer increments on this same edge below
                 rb_pending <= 1'b1;
                 rb_addr_l  <= {regs[9'h12e][6:0], read_ptr};
             end
         end
 
-        // The dual port RAM presents the reverb data port byte one clock after
-        // the CPU read begins. Hold the Z80 until that output is valid, just as
-        // for a serialized ROM bank read.
+        // The dual port RAM presents the reverb byte one clock after the read
+        // starts; hold the Z80 until it is valid
         if (!rr_cpu_read) begin
             rr_cpu_read_seen <= 1'b0;
             rr_cpu_data_valid <= 1'b0;
@@ -481,14 +415,10 @@ always @(posedge clk) begin
             rr_cpu_data_valid <= 1'b0;
             rr_cpu_addr_l <= rr_port_addr;
         end else begin
-            // Capture the registered RAM result before the live serial pointer
-            // selects the following byte.
             rr_cpu_data <= rram_port_dout;
             rr_cpu_data_valid <= 1'b1;
         end
-        // Use only idle slack for the CPU data port. The chip keeps its 48 kHz
-        // stream running while this port is accessed, so a data port read must
-        // never freeze the sample counter.
+        // Use only idle slack: the 48 kHz stream must not stop for a data port
         if (rb_pending && !rb_active && (state == S_IDLE) &&
             (sample_cnt != 9'd0) && (sample_cnt < 9'd320)) begin
             rb_pending <= 1'b0;
@@ -500,39 +430,31 @@ always @(posedge clk) begin
             rb_data_valid <= 1'b1;
         end
 
-        // Ordinary register storage is transparent for the duration of the
-        // active low write enable. Position bytes are diverted to the
-        // UPDATE_AT_KEYON latches until key-on release.
+        // Register storage is transparent while the write strobe is low.
+        // Position bytes divert to the UPDATE_AT_KEYON latches
         if (cpu_write_active) begin
             if (addr == 9'h12f) begin
-                // 0x22f D7 is transparent; D0/D1/D4/D5 commit below.
-                regs[9'h12f][7] <= din[7];
+                regs[9'h12f][7] <= din[7];   // D7 transparent; D0/1/4/5 commit below
             end else if (update_at_keyon && !addr[8] &&
                          (addr[4:0] >= 5'h0c) && (addr[4:0] <= 5'h0e)) begin
                 pos_latch[pl_idx] <= din;
             end else if (addr[8] && (addr[7:4] == 4'h0) && addr[0]) begin
-                // Odd channel control D0 is release latched; its D2/D4/D5
-                // fields are transparent while the strobe is active.
+                // Odd channel control D0 is release latched
                 regs[addr] <= {din[7:1], regs[addr][0]};
             end else begin
                 regs[addr] <= din;
             end
         end
 
-        // The decapped start/stop block captures key-on at nKONWR release.
+        // The decapped start/stop block captures key-on at nKONWR release
         if (cpu_write_commit) begin
             case (cpu_write_addr)
                 9'h114: begin
-                    // MAME suppresses all register updates while bit 7 of the
-                    // global control is set. With UPDATE_AT_KEYON, copy the
-                    // three latched position bytes atomically.
                     if (reg_updates) begin
                         active  <= active | cpu_write_data;
-                        // Key-on restarts every selected voice, including one
-                        // whose active bit is already set: voices are reused
-                        // rapidly for event effects, and suppressing an
-                        // active-to-active retrigger would leave the new
-                        // position latch unconsumed and silence later SFX.
+                        // Key-on restarts every selected voice, including an
+                        // already active one: MAME reaches the same result via
+                        // its cur_pos != chan->pos test at k054539.cpp:186
                         restart <= restart | cpu_write_data;
                     end
                     if (update_at_keyon) begin
@@ -545,20 +467,17 @@ always @(posedge clk) begin
                         end
                     end
                 end
-                // SiliconRE shows 0x22f bits 0/1/4/5 captured on the rising
-                // edge of its decoded active low write strobe. D7 stays
-                // transparent above and D2/D3/D6 are unimplemented.
+                // SiliconRE captures 0x22f D0/D1/D4/D5 on the write strobe
+                // rising edge; D7 is transparent above, D2/D3/D6 unimplemented
                 9'h12f: begin
                     regs[9'h12f][0] <= cpu_write_data[0];
                     regs[9'h12f][1] <= cpu_write_data[1];
                     regs[9'h12f][4] <= cpu_write_data[4];
                     regs[9'h12f][5] <= cpu_write_data[5];
-                    // MAME k054539.cpp:444-448: disabling the timer output
-                    // (bit 5 low) forces m_timer_state back to 0 immediately.
+                    // k054539.cpp:449-454: clearing bit 5 forces the output low
                     if (!cpu_write_data[5]) timer_state <= 1'b0;
                 end
-                // MAME k054539.cpp:421-429 (0x227): every write reprograms the
-                // period and resets the toggle state, regardless of bit 5.
+                // k054539.cpp:424-432: any 0x227 write reprograms and restarts
                 9'h127: begin
                     timer_cnt   <= 13'd0;
                     timer_state <= 1'b0;
@@ -571,8 +490,8 @@ always @(posedge clk) begin
                 end
             endcase
         end
-        // Key-off is level visible for the full decoded write strobe in the
-        // decapped start/stop block; release must not apply it a second time.
+        // Key-off is level visible for the whole write strobe in the decapped
+        // start/stop block; release must not apply it twice
         if (cpu_write_active) begin
             case (addr)
                 9'h115: if (reg_updates) active <= active & ~din;
@@ -581,9 +500,8 @@ always @(posedge clk) begin
             endcase
         end
 
-        // 0x22d advances the serial pointer for both writes and reads; 0x22e
-        // selects a bank and resets the pointer. ROM bank reads go through the
-        // streaming ROM path; the reverb bank answers from the RAM above.
+        // 0x22d advances the serial pointer on reads and writes; 0x22e selects
+        // a bank and resets it
         if (cpu_write_commit && (cpu_write_addr == 9'h12d))
             read_ptr <= read_ptr + 17'd1;
         else if ((rb_cpu_read && !rb_read_seen) ||
@@ -594,17 +512,14 @@ always @(posedge clk) begin
 
         if (cen) begin
             sample_cnt <= (sample_cnt == 9'd383) ? 9'd0 : sample_cnt + 9'd1;
-            // Hold the SDRAM request until rom_ok. `cen` runs at 18.432 MHz
-            // against a 48 MHz clock, so an unconditional clear here would
-            // drop the request several clocks before the shared SDRAM could
-            // answer it, and the *_ok handshake would never complete. The
-            // capture states re-assert it explicitly for the next byte.
+            // Hold the SDRAM request until rom_ok: `cen` is 18.432 MHz on a
+            // 48 MHz clock, so clearing it unconditionally would drop the
+            // request before the shared SDRAM could answer
             sample_rom_cs <= (state==S_R8 || state==S_R16L ||
                               state==S_R16H || state==S_RD) && !rom_ok;
-            rr_we  <= 1'b0;   // no reverb write by default (rom_cs pattern)
+            rr_we  <= 1'b0;   // no reverb write by default
 
-            // Programmable timer divider: advances once per audio sample tick,
-            // independent of the PCM sequencer below.
+            // Timer divider, one step per audio sample tick
             if (timer_armed && (sample_cnt == 9'd0)) begin
                 if (timer_sum >= {1'b0, TIMER_THRESH}) begin
                     timer_cnt <= timer_sum[12:0] - TIMER_THRESH;
@@ -618,21 +533,20 @@ always @(posedge clk) begin
             S_IDLE: if ((sample_cnt == 9'd0) && !rb_active) begin
                         ch <= 0;
                         if (regs[9'h12f][0]) begin
-                            state <= S_REVRD;   // rd_addr=reverb_pos, data ready in S_REVRD
+                            state <= S_REVRD;
                         end else begin
                             accL <= 0; accR <= 0; state <= S_LOAD;   // chip off: no reverb
                         end
                     end
 
-            // ---------- reverb: feedback @reverb_pos seeds accL/accR, clears the slot ----------
+            // reverb: feedback @reverb_pos seeds accL/accR and the slot clears
             S_REVRD: begin
-                accL <= { {8{rr_dout[15]}}, rr_dout, 16'b0 };   // rbase[revpos]<<16 (Q40, sext)
+                accL <= { {8{rr_dout[15]}}, rr_dout, 16'b0 };   // rbase[revpos]<<16
                 accR <= { {8{rr_dout[15]}}, rr_dout, 16'b0 };
-                rr_addr <= reverb_pos; rr_din <= 16'sd0; rr_we <= 1'b1;   // rram[reverb_pos] <= 0
+                rr_addr <= reverb_pos; rr_din <= 16'sd0; rr_we <= 1'b1;
                 state <= S_LOAD;
             end
 
-            // ---------- load channel parameters and set the accumulator up ----------
             S_LOAD: begin
                 if (!active[ch] || !regs[9'h12f][0]) begin
                     state <= S_NEXT;
@@ -643,18 +557,16 @@ always @(posedge clk) begin
                     w_pan    <=  pan_idx(regs[b1+9'd5]);
                     w_type   <=  type_now;
                     w_reverse<=  regs[b2][5];
-                    // pos/frac base in byte units. DPCM is scaled to nibbles.
+                    // pos/frac base in byte units; DPCM is scaled to nibbles
                     if (type_now == 2'd2) begin
-                        // DPCM: pos<<1, frac<<1, carry fix, then += delta
                         if (restart[ch]) begin
                             w_pos   <= {regs[b1+9'he], regs[b1+9'hd], regs[b1+9'hc]} << 1;
                             w_pfrac <= delta_signed;                     // (0<<1)=0, +/-delta
                             w_val   <= 0; w_pval <= 0;
-                            // Do not lose a same-clock CPU retrigger while the
-                            // sequencer consumes the old request.
+                            // do not lose a same-clock CPU retrigger
                             restart[ch] <= keyon_retrigger[ch];
                         end else begin
-                            // frac<<1; if bit16 -> pos|1, frac&0xffff; then +delta
+                            // frac<<1; bit16 -> pos|1, frac&0xffff; then +delta
                             w_pos   <= ({cpos[ch],1'b0}) | (cpfrac[ch][15] ? 25'd1 : 25'd0);
                             w_pfrac <= $signed({15'b0, cpfrac[ch], 1'b0}) + delta_signed
                                        - (cpfrac[ch][15] ? 32'h0001_0000 : 32'd0);
@@ -667,9 +579,7 @@ always @(posedge clk) begin
                             w_val   <= 0; w_pval <= 0;
                             restart[ch] <= keyon_retrigger[ch];
                         end else if (type_now == 2'd3) begin
-                            // MAME default branch (sample type 0xc): the switch
-                            // body never runs, so `cur_pfrac += delta` never
-                            // executes and cur_pos/cur_val stay untouched.
+                            // MAME default branch: cur_pfrac+=delta never runs
                             w_pos   <= {1'b0, cpos[ch]};
                             w_pfrac <= $signed({16'b0, cpfrac[ch]});
                             w_val   <= cval[ch]; w_pval <= cpval[ch];
@@ -679,20 +589,18 @@ always @(posedge clk) begin
                             w_val   <= cval[ch]; w_pval <= cpval[ch];
                         end
                     end
-                    // type 0xc (2'd3) never fetches ROM data nor advances the
-                    // position: go straight to the mix/writeback step.
                     state <= (type_now == 2'd3) ? S_MIX : S_ACC;
                 end
             end
 
-            // ---------- while(cur_pfrac & ~0xffff): advance and read ----------
+            // while(cur_pfrac & ~0xffff): advance and read
             S_ACC: begin
                 if (|w_pfrac[31:16]) begin
-                    // Forward playback subtracts one whole fraction; reverse
-                    // playback adds it back while the signed fraction is
-                    // negative, matching MAME's fdelta/pdelta pair.
+                    // forward subtracts a whole fraction, reverse adds it back:
+                    // MAME's fdelta/pdelta pair
                     w_pfrac <= w_pfrac +
                                (w_reverse ? 32'sh0001_0000 : -32'sh0001_0000);
+                    w_looped <= 1'b0;   // one loop retry per iteration
                     case (w_type)
                     2'd0: begin // 8 bit: +1 byte
                         w_pos    <= npos1;
@@ -715,17 +623,17 @@ always @(posedge clk) begin
                 end
             end
 
-            // ---------- 8 bit capture (waits for rom_ok: SDRAM data ready) ----------
+            // 8 bit capture, waits for rom_ok
             S_R8: if (rom_ok) begin
                 w_pval <= w_val;
                 if (rom_data == 8'h80) begin
-                    if (w_loopen) begin
+                    if (w_loopen && !w_looped) begin
+                        w_looped <= 1'b1;
                         w_pos <= {1'b0, w_loop}; sample_rom_addr <= w_loop; sample_rom_cs <= 1'b1; state <= S_R8;
                     end else begin
-                        // A key-on queued after this channel's S_LOAD belongs to
-                        // the replacement voice. Do not let the old in-flight
-                        // sample's terminator retire it before the next S_LOAD
-                        // consumes the pending restart.
+                        // A key-on queued after this channel's S_LOAD is for
+                        // the replacement voice; the retiring sample must not
+                        // clear its active bit first
                         if (reg_updates && !restart[ch] && !keyon_retrigger[ch]) active[ch] <= 1'b0;
                         w_val <= 16'sd0; state <= S_MIX;
                     end
@@ -734,7 +642,7 @@ always @(posedge clk) begin
                 end
             end
 
-            // ---------- 16 bit capture (low byte then high), rom_ok on each ----------
+            // 16 bit capture, low byte then high, rom_ok on each
             S_R16L: if (rom_ok) begin
                 w_lo     <= rom_data;
                 sample_rom_addr <= w_pos[23:0] + 24'd1;   // high byte
@@ -743,7 +651,8 @@ always @(posedge clk) begin
             S_R16H: if (rom_ok) begin
                 w_pval <= w_val;
                 if ({rom_data, w_lo} == 16'h8000) begin
-                    if (w_loopen) begin
+                    if (w_loopen && !w_looped) begin
+                        w_looped <= 1'b1;
                         w_pos <= {1'b0, w_loop}; sample_rom_addr <= w_loop; sample_rom_cs <= 1'b1; state <= S_R16L;
                     end else begin
                         if (reg_updates && !restart[ch] && !keyon_retrigger[ch]) active[ch] <= 1'b0;
@@ -754,10 +663,11 @@ always @(posedge clk) begin
                 end
             end
 
-            // ---------- DPCM capture (waits for rom_ok) ----------
+            // DPCM capture, waits for rom_ok
             S_RD: if (rom_ok) begin
                 if (rom_data == 8'h88) begin
-                    if (w_loopen) begin
+                    if (w_loopen && !w_looped) begin
+                        w_looped <= 1'b1;
                         w_pos <= {w_loop, 1'b0}; sample_rom_addr <= w_loop; sample_rom_cs <= 1'b1; state <= S_RD;
                     end else begin
                         if (reg_updates && !restart[ch] && !keyon_retrigger[ch]) active[ch] <= 1'b0;
@@ -770,7 +680,7 @@ always @(posedge clk) begin
                 end
             end
 
-            // ---------- mix and writeback (DPCM is scaled back down) ----------
+            // mix and writeback; DPCM is scaled back down
             S_MIX: begin
                 accL <= accL + contribL;
                 accR <= accR + contribR;
@@ -781,15 +691,10 @@ always @(posedge clk) begin
                     cpos[ch]   <= w_pos[23:0];
                     cpfrac[ch] <= w_pfrac[15:0];
                 end
-                // The silicon mirrors the current sample position into the
-                // channel's 0x0c..0x0e bytes while register updates are
-                // enabled. This is observable through the Z80 readback path and
-                // is required by diagnostics.
-                // A CPU key-on may commit a new latched start on this exact
-                // clock edge. Give that command priority over the retiring
-                // voice's live position mirror; otherwise S_LOAD consumes
-                // restart from the just overwritten end address and the
-                // replacement effect is silent or malformed.
+                // The silicon mirrors the live position into 0x0c..0x0e while
+                // register updates are enabled; the Z80 diagnostics read it
+                // back. A key-on committing on this same edge wins, otherwise
+                // S_LOAD would consume restart from the overwritten end address
                 if (reg_updates && !restart[ch] && !keyon_retrigger[ch]) begin
                     regs[b1+9'h0c] <= (w_type == 2'd2) ? w_pos[8:1]  : w_pos[7:0];
                     regs[b1+9'h0d] <= (w_type == 2'd2) ? w_pos[16:9] : w_pos[15:8];
@@ -797,12 +702,12 @@ always @(posedge clk) begin
                 end
                 cval[ch]  <= w_val;
                 cpval[ch] <= w_pval;
-                state <= S_RVWR;        // rd_addr=widx issued in S_MIX, ready in S_RVWR
+                state <= S_RVWR;        // rd_addr=widx issued here, ready in S_RVWR
             end
 
-            // ---------- reverb RMW: rram[widx] += rev_contrib (int16, wraps) ----------
+            // reverb RMW: rram[widx] += rev_contrib (int16, wraps)
             S_RVWR: begin
-                rr_addr <= widx;                   // write address (ch not yet advanced)
+                rr_addr <= widx;                   // ch not yet advanced
                 rr_din  <= rr_dout + rev_contrib;  // rr_dout = old rram[widx]
                 rr_we   <= 1'b1;                   // commits during S_NEXT
                 state   <= S_NEXT;

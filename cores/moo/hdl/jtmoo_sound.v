@@ -42,8 +42,14 @@ wire [15:0] A;
 wire        m1_n, mreq_n, rd_n, wr_n, iorq_n, rfsh_n, nmi_n,
             cpu_cen, fm_intn, latch_we, int_n, bank_we_fall, k39_busy;
 reg         ram_cs, fm_cs, k39_cs, k21_cs, bank_we, mem_acc, nmi_clr, bank_we_l;
-wire signed [15:0] fm_l, fm_r;
+wire signed [15:0] fm_l, fm_r, pcm_l, pcm_r;
 wire [ 2:0] nc;
+// K054321 global volume (054986A U2, in series with the AD1868). The counter
+// lives here rather than in the shared jt054321.v because that module cannot
+// gain audio ports without raising PINMISSING in rungun/xmen
+reg  [ 6:0] k21_vol;    // 0..64, 40 = unity, MAME k054321.cpp:99-113
+reg  [ 2:0] vol_dec;    // k21_vol/10
+reg  [ 3:0] vol_frac;   // k21_vol%10
 
 assign latch_we = k21_cs && !wr_n;
 assign rom_hi   = A[15] ? bank : {3'd0, A[14]};
@@ -78,6 +84,53 @@ always @(posedge clk, posedge rst) begin
         nmi_clr <= ~cpu_dout[4];
     end
 end
+
+// K054321 main-side register 2 resets the volume, register 3 steps it up while
+// the written data is non zero (MAME k054321.cpp:44-45,99-113)
+always @(posedge clk, posedge rst) begin
+    if( rst ) begin
+        k21_vol  <= 0;
+        vol_dec  <= 0;
+        vol_frac <= 0;
+    end else if( pair_we ) case( main_addr )
+        4'd2: begin k21_vol <= 0; vol_dec <= 0; vol_frac <= 0; end
+        4'd3: if( |main_dout && k21_vol!=7'd64 ) begin
+            k21_vol <= k21_vol+7'd1;
+            if( vol_frac==4'd9 ) begin
+                vol_frac <= 0;
+                vol_dec  <= vol_dec+3'd1;
+            end else begin
+                vol_frac <= vol_frac+4'd1;
+            end
+        end
+        default:;
+    endcase
+end
+
+// gain = 2^((vol-40)/10) = (2^((vol%10)/10) << (vol/10)) >> 4, Q16
+function [16:0] pow2_dec(input [3:0] n);
+    case(n)
+        4'd0: pow2_dec = 17'd65536;   4'd1: pow2_dec = 17'd70239;
+        4'd2: pow2_dec = 17'd75281;   4'd3: pow2_dec = 17'd80684;
+        4'd4: pow2_dec = 17'd86475;   4'd5: pow2_dec = 17'd92682;
+        4'd6: pow2_dec = 17'd99333;   4'd7: pow2_dec = 17'd106462;
+        4'd8: pow2_dec = 17'd114102;  4'd9: pow2_dec = 17'd122292;
+        default: pow2_dec = 17'd65536;
+    endcase
+endfunction
+
+function signed [15:0] clip16(input signed [19:0] v);
+    clip16 = (v >  20'sd32767) ?  16'sd32767 :
+             (v < -20'sd32768) ? -16'sd32768 : v[15:0];
+endfunction
+
+wire [22:0] gsh = {6'd0, pow2_dec(vol_frac)} << vol_dec;
+wire signed [19:0] k21_gain = $signed({1'b0, gsh[22:4]});
+wire signed [35:0] volp_l = pcm_l * k21_gain;
+wire signed [35:0] volp_r = pcm_r * k21_gain;
+
+assign k539_l = clip16(volp_l[35:16]);
+assign k539_r = clip16(volp_r[35:16]);
 
 // NMI latches on the YM2151 IRQ assertion edge
 jtframe_edge #(.QSET(0)) u_edge (
@@ -139,9 +192,6 @@ jt51 u_jt51(
 );
 
 /* verilator tracing_on */
-// LOCAL VERIFICATION ONLY - swap back to jt539 once jotego answers on the
-// K054539 PR path. The only differences in the instantiation are the added
-// rom_ok handshake and the busy output; every other connection is identical.
 jtmoo_k054539 #(.VOLSHIFT(1)) u_k54539(
     .rst        ( rst       ),
     .clk        ( clk       ),
@@ -163,9 +213,9 @@ jtmoo_k054539 #(.VOLSHIFT(1)) u_k54539(
     // YM input, AUX1
     .aux_l      ( fm_l      ),
     .aux_r      ( fm_r      ),
-    // Sound output
-    .left       ( k539_l    ),
-    .right      ( k539_r    ),
+    // Sound output, through the K054321 volume stage below
+    .left       ( pcm_l     ),
+    .right      ( pcm_r     ),
     // debug
     .debug_bus  ( debug_bus ),
     .st_dout    ( st_dout   )
