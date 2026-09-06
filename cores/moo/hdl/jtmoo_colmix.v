@@ -74,6 +74,7 @@ wire        pcu_we, reg_we, col_n, k338_video_en, clipsl, alpha_add, pblend0,
 wire signed [9:0] shad_r, shad_g, shad_b;
 reg  [23:0] bgr;
 reg  [11:0] lyrf_l;
+reg  [ 7:0] lyrf_p;
 reg  [ 7:0] r8, g8, b8, fr8, fg8, fb8;
 reg         fixop_a, ph, ph_l;
 
@@ -107,9 +108,11 @@ assign blank_a    = fixop_a ? 1'b0 : col_n;
 assign shd_a      = fixop_a ? 2'b0 : shd_out;
 assign bri_a      = fixop_a ? 1'b0 : brit;
 assign blend_a    = fixop_a & pblend0;
-// plane 0 reads the palette on the odd clock cycles, bank 0x700-0x7FF
+// plane 0 reads the palette on the odd clock cycles, bank 0x700-0x7FF.
+// lyrf_p spends the second pxl_cen the K053251 costs the back colour, so the
+// plane-0 colour lands on the same pixel as fixop_a, col and the back colour.
 assign vid_pal_addr = ioctl_ram ? ioctl_addr[12:2] :
-                    ph        ? {3'b111,lyrf_l[7:0]}    : col;
+                    ph        ? {3'b111,lyrf_p}        : col;
 
 // palette RAM port 0 is the CPU, port 1 the video/ioctl read
 assign pal_addr   = cpu_pal_addr;
@@ -180,6 +183,7 @@ always @(posedge clk, posedge rst) begin
         bgr     <= 0;
         fixop_a <= 0;
         lyrf_l  <= 0;
+        lyrf_p  <= 0;
         {r8,g8,b8}    <= 0;
         {fr8,fg8,fb8} <= 0;
         ph      <= 0;
@@ -193,6 +197,7 @@ always @(posedge clk, posedge rst) begin
             { r8,  g8,  b8  } <= { pal_r, pal_g, pal_b };
         if( pxl_cen ) begin
             lyrf_l  <= lyrf_pxl;
+            lyrf_p  <= lyrf_l[7:0];
             fixop_a <= p0_opaque;
             bgr     <= apply_bright( !k338_video_en   ? 24'd0 :
                        blank_a          ? {k338_bg[7:0],k338_bg[15:8],k338_bg[23:16]} :
